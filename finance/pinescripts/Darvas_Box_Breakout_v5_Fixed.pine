@@ -1,0 +1,368 @@
+//@version=5
+indicator("Darvas Box Breakout v5 - Containment + 2-Stage Option", overlay=true, max_boxes_count=50, max_labels_count=100)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Inputs
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+pivotLen      = input.int(3, "Pivot Length", minval=1)
+minConsolBars = input.int(5, "Minimum Consolidation Bars", minval=2)
+maxBoxPct     = input.float(4.0, "Max Box Height %", minval=0.5, step=0.5)
+containTolPct = input.float(0.05, "Containment Tolerance %", minval=0.0, step=0.05, tooltip="Small wiggle room for wicks right at the box edge")
+
+showBox       = input.bool(true, "Show Box")
+showSignals   = input.bool(true, "Show Signals")
+
+// Volume
+useVolFilter  = input.bool(true, "Require High Volume")
+volLen        = input.int(20, "Volume MA Length", minval=1)
+volMultiplier = input.float(1.20, "High Volume Multiplier", minval=0.5, step=0.05)
+
+// Retest / confirmation
+retestBars         = input.int(5, "Max Bars To Wait For Retest", minval=1)
+retestTolPct        = input.float(0.15, "Retest Tolerance %", minval=0.0, step=0.05)
+requireContinuation = input.bool(false, "Require Continuation After Retest (3-stage, more lag)")
+confirmBars         = input.int(3, "Max Bars To Wait For Continuation (if 3-stage)", minval=1)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Pivot detection
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ph = ta.pivothigh(high, pivotLen, pivotLen)
+pl = ta.pivotlow(low, pivotLen, pivotLen)
+
+var float boxTop    = na
+var float boxBot    = na
+var int   boxTopBar = na
+var int   boxBotBar = na
+
+var box activeBox = na
+var bool boxActive = false
+
+// [NEW: containment tracking] - running high/low since the current
+// candidate top formed, used to reject boxes where price actually
+// spiked outside the range mid-formation.
+var float rangeHigh = na
+var float rangeLow  = na
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Volume filter
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+volMA = ta.sma(volume, volLen)
+highVolume = volume > volMA * volMultiplier
+volOk = not useVolFilter or highVolume
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Build box - top & bottom paired to the SAME consolidation
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+if not na(ph)
+    boxTop    := ph
+    boxTopBar := bar_index - pivotLen
+    boxBot    := na
+    boxBotBar := na
+    boxActive := false
+    rangeHigh := high     // reset containment tracking for the new candidate box
+    rangeLow  := low
+
+// keep tracking the true high/low of every bar since the top formed
+if not na(boxTop)
+    rangeHigh := math.max(rangeHigh, high)
+    rangeLow  := math.min(rangeLow, low)
+
+if not na(pl) and not na(boxTop) and (bar_index - pivotLen) > boxTopBar and pl < boxTop
+    boxBot    := pl
+    boxBotBar := bar_index - pivotLen
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Validate box
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+boxReady = not na(boxTop) and not na(boxBot)
+
+boxHeightPct = boxReady ?
+     (boxTop - boxBot) / boxBot * 100.0 :
+     na
+
+// [NEW: containment check] - no bar between top and now may have
+// poked outside [boxBot, boxTop] beyond a tiny tolerance. Kills
+// "boxes" built from two pivots with a spike hiding in between.
+containedOk =
+     boxReady and
+     not na(rangeHigh) and
+     not na(rangeLow) and
+     rangeHigh <= boxTop * (1 + containTolPct / 100.0) and
+     rangeLow  >= boxBot * (1 - containTolPct / 100.0)
+
+isTightBox =
+     boxReady and
+     boxTop > boxBot and
+     boxHeightPct <= maxBoxPct and
+     containedOk
+
+barsSinceTop = not na(boxTopBar) ? bar_index - boxTopBar : na
+barsSinceBot = not na(boxBotBar) ? bar_index - boxBotBar : na
+
+consolOk =
+     not na(barsSinceTop) and
+     not na(barsSinceBot) and
+     barsSinceTop >= minConsolBars and
+     barsSinceBot >= minConsolBars
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Setup state machine
+//
+// 0 = No setup
+// 1 = Breakdown/breakout happened, waiting for retest
+// 2 = Failed retest confirmed, waiting for continuation (3-stage mode only)
+//
+// setupDir: -1 = Bearish / Put   +1 = Bullish / Call
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+var int setupState = 0
+var int setupDir = 0
+
+var float brokenLevel = na
+var float retestExtreme = na
+var int setupStartBar = na
+
+var bool bearTouched  = false
+var int  bearTouchBar = na
+var bool bullTouched  = false
+var int  bullTouchBar = na
+
+// NOTE: Pine v5 does not allow a user-defined function to reassign
+// outer-scope `var` variables with `:=`. Reset logic is inlined at
+// every call site below instead of a shared function.
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Activate box only when no previous setup is active
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+if isTightBox and consolOk and setupState == 0
+    boxActive := true
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Draw / update box
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+if showBox and boxActive and boxReady
+    if na(activeBox)
+        activeBox := box.new(
+             left=boxTopBar,
+             top=boxTop,
+             right=bar_index,
+             bottom=boxBot,
+             border_color=color.new(color.blue, 0),
+             bgcolor=color.new(color.blue, 85))
+    else
+        box.set_left(activeBox, boxTopBar)
+        box.set_right(activeBox, bar_index)
+        box.set_top(activeBox, boxTop)
+        box.set_bottom(activeBox, boxBot)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Initial breakout (not the final signal - just starts a setup)
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+shortBreakout =
+     boxActive and
+     boxReady and
+     ta.crossunder(close, boxBot) and
+     volOk
+
+longBreakout =
+     boxActive and
+     boxReady and
+     ta.crossover(close, boxTop) and
+     volOk
+
+if shortBreakout
+    setupState := 1
+    setupDir := -1
+    brokenLevel := boxBot
+    retestExtreme := na
+    setupStartBar := bar_index
+    bearTouched := false
+    bearTouchBar := na
+
+    boxActive := false
+    if not na(activeBox)
+        box.delete(activeBox)
+        activeBox := na
+    boxTop := na
+    boxBot := na
+    boxTopBar := na
+    boxBotBar := na
+
+if longBreakout
+    setupState := 1
+    setupDir := 1
+    brokenLevel := boxTop
+    retestExtreme := na
+    setupStartBar := bar_index
+    bullTouched := false
+    bullTouchBar := na
+
+    boxActive := false
+    if not na(activeBox)
+        box.delete(activeBox)
+        activeBox := na
+    boxTop := na
+    boxBot := na
+    boxTopBar := na
+    boxBotBar := na
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// RETEST STAGE - touch and confirmation split across separate bars
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+bearRetestZone = setupDir == -1 and high >= brokenLevel * (1 - retestTolPct / 100.0)
+bullRetestZone = setupDir == 1 and low <= brokenLevel * (1 + retestTolPct / 100.0)
+
+if setupState == 1 and setupDir == -1 and bearRetestZone and not bearTouched
+    bearTouched := true
+    bearTouchBar := bar_index
+
+if setupState == 1 and setupDir == 1 and bullRetestZone and not bullTouched
+    bullTouched := true
+    bullTouchBar := bar_index
+
+bearFailedRetest =
+     setupState == 1 and setupDir == -1 and
+     bearTouched and bar_index > bearTouchBar and
+     close < brokenLevel
+
+bullFailedRetest =
+     setupState == 1 and setupDir == 1 and
+     bullTouched and bar_index > bullTouchBar and
+     close > brokenLevel
+
+// Invalidation: price closes back inside the old box
+bearBreakdownFailed = setupState == 1 and setupDir == -1 and close > brokenLevel
+bullBreakoutFailed  = setupState == 1 and setupDir == 1  and close < brokenLevel
+
+if bearBreakdownFailed
+    setupState := 0
+    setupDir := 0
+    brokenLevel := na
+    retestExtreme := na
+    setupStartBar := na
+    bearTouched := false
+    bearTouchBar := na
+
+if bullBreakoutFailed
+    setupState := 0
+    setupDir := 0
+    brokenLevel := na
+    retestExtreme := na
+    setupStartBar := na
+    bullTouched := false
+    bullTouchBar := na
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 2-stage vs 3-stage signal
+//
+// 2-stage (default): failed retest close IS the signal. Fires earlier,
+// closer to the actual turn, instead of waiting for continuation past
+// an already-extended move.
+//
+// 3-stage (optional): old behavior - failed retest arms stage 2, and
+// price must also close beyond the retest candle's extreme.
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+shortSignal = false
+longSignal = false
+
+if bearFailedRetest
+    if requireContinuation
+        setupState := 2
+        retestExtreme := low
+        setupStartBar := bar_index
+    else
+        shortSignal := true
+
+if bullFailedRetest
+    if requireContinuation
+        setupState := 2
+        retestExtreme := high
+        setupStartBar := bar_index
+    else
+        longSignal := true
+
+bearContinuation = setupState == 2 and setupDir == -1 and close < retestExtreme
+bullContinuation = setupState == 2 and setupDir == 1  and close > retestExtreme
+
+if requireContinuation and bearContinuation
+    shortSignal := true
+if requireContinuation and bullContinuation
+    longSignal := true
+
+if shortSignal or longSignal
+    setupState := 0
+    setupDir := 0
+    brokenLevel := na
+    retestExtreme := na
+    setupStartBar := na
+    bearTouched := false
+    bearTouchBar := na
+    bullTouched := false
+    bullTouchBar := na
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Setup timeout
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+waitingForRetest = setupState == 1
+waitingForContinuation = setupState == 2
+
+if waitingForRetest and bar_index - setupStartBar > retestBars
+    setupState := 0
+    setupDir := 0
+    brokenLevel := na
+    retestExtreme := na
+    setupStartBar := na
+    bearTouched := false
+    bearTouchBar := na
+    bullTouched := false
+    bullTouchBar := na
+
+if waitingForContinuation and bar_index - setupStartBar > confirmBars
+    setupState := 0
+    setupDir := 0
+    brokenLevel := na
+    retestExtreme := na
+    setupStartBar := na
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Plot current box
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+plot(boxActive ? boxTop : na, "Box Top", color=color.new(color.green, 0), linewidth=2, style=plot.style_linebr)
+plot(boxActive ? boxBot : na, "Box Bottom", color=color.new(color.red, 0), linewidth=2, style=plot.style_linebr)
+plot(setupState > 0 ? brokenLevel : na, "Broken Level", color=color.new(color.orange, 0), linewidth=2, style=plot.style_linebr)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Visual signals
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+plotshape(showSignals and shortBreakout, title="Breakdown Detected", style=shape.triangledown, location=location.abovebar, color=color.orange, size=size.small, text="BD")
+plotshape(showSignals and bearFailedRetest, title="Failed Retest", style=shape.circle, location=location.abovebar, color=color.yellow, size=size.tiny, text="RT")
+plotshape(showSignals and shortSignal, title="Confirmed Put Signal", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.large, text="PUT")
+
+plotshape(showSignals and longBreakout, title="Breakout Detected", style=shape.triangleup, location=location.belowbar, color=color.orange, size=size.small, text="BO")
+plotshape(showSignals and bullFailedRetest, title="Bullish Failed Retest", style=shape.circle, location=location.belowbar, color=color.yellow, size=size.tiny, text="RT")
+plotshape(showSignals and longSignal, title="Confirmed Call Signal", style=shape.triangleup, location=location.belowbar, color=color.lime, size=size.large, text="CALL")
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Alerts
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+alertcondition(shortBreakout, title="Darvas Breakdown Detected", message="Darvas bearish breakdown detected with volume. Wait for failed retest.")
+alertcondition(bearFailedRetest, title="Bearish Failed Retest", message="Darvas bearish breakdown has successfully retested and rejected the broken support.")
+alertcondition(shortSignal, title="Confirmed PUT Signal", message="CONFIRMED PUT: Darvas breakdown + high volume + failed retest (+ continuation if enabled).")
+
+alertcondition(longBreakout, title="Darvas Breakout Detected", message="Darvas bullish breakout detected with volume. Wait for failed retest.")
+alertcondition(bullFailedRetest, title="Bullish Failed Retest", message="Darvas bullish breakout has successfully retested and rejected the broken resistance.")
+alertcondition(longSignal, title="Confirmed CALL Signal", message="CONFIRMED CALL: Darvas breakout + high volume + failed retest (+ continuation if enabled).")
