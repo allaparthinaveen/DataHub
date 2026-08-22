@@ -349,11 +349,11 @@ plot(setupState > 0 ? brokenLevel : na, "Broken Level", color=color.new(color.or
 
 plotshape(showSignals and shortBreakout, title="Breakdown Detected", style=shape.triangledown, location=location.abovebar, color=color.orange, size=size.small, text="BD")
 plotshape(showSignals and bearFailedRetest, title="Failed Retest", style=shape.circle, location=location.abovebar, color=color.yellow, size=size.tiny, text="RT")
-plotshape(showSignals and shortSignal, title="Confirmed Put Signal", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.large, text="PUT")
+plotshape(showSignals and shortSignal, title="Confirmed Put Signal", style=shape.triangledown, location=location.abovebar, color=color.rgb(189, 21, 21), size=size.large, text="PUT")
 
 plotshape(showSignals and longBreakout, title="Breakout Detected", style=shape.triangleup, location=location.belowbar, color=color.orange, size=size.small, text="BO")
 plotshape(showSignals and bullFailedRetest, title="Bullish Failed Retest", style=shape.circle, location=location.belowbar, color=color.yellow, size=size.tiny, text="RT")
-plotshape(showSignals and longSignal, title="Confirmed Call Signal", style=shape.triangleup, location=location.belowbar, color=color.lime, size=size.large, text="CALL")
+plotshape(showSignals and longSignal, title="Confirmed Call Signal", style=shape.triangleup, location=location.belowbar, color=color.rgb(12, 122, 69), size=size.large, text="CALL")
 
 //━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Alerts
