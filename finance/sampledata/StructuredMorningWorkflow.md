@@ -1,3 +1,5 @@
+Daily chart-analysis prompt
+----------
 Act as a neutral technical-market analyst, not a trade-call provider.
 
 Analyze only the information visible in the attached chart. Do not use future candles,
@@ -50,6 +52,54 @@ Analyze:
 Do not give a BUY or SELL instruction unless the conditions are explicit.
 If the chart does not provide enough information, say “insufficient data.”
 
+
+
+
+-----------
+
+Also ask the AI to produce three scenarios, not one prediction:
+
+| Scenario | Condition                                          | Invalidation                       | Action                           |
+| -------- | -------------------------------------------------- | ---------------------------------- | -------------------------------- |
+| Bullish  | Candle closes above resistance with follow-through | Price falls back below resistance  | Consider only after confirmation |
+| Bearish  | Price rejects resistance and closes below support  | Price reclaims the broken level    | Avoid chasing; reassess          |
+| No trade | Price remains inside the range                     | Range expands without confirmation | Wait                             |
+
+Important limitation
+Do not ask the AI to produce a guaranteed daily “BUY/SELL prediction.” Ask it to produce:
+
+A market-structure assessment.
+
+Clear bullish and bearish conditions.
+
+A no-trade condition.
+
+Entry only after confirmation.
+
+Stop-loss and invalidation.
+
+A risk-based position size.
+--------------
+
+
+Use a structured morning workflow
+For consistency, give the AI:
+
+The same instrument and timeframe.
+
+A clean screenshot taken before the trading session or at a defined time.
+
+The current price and candle timestamp.
+
+The previous day’s high, low, close, and volume.
+
+Relevant support and resistance levels.
+
+The exact indicator settings.
+
+The market session and timezone.
+
+Whether candles are closed or still forming.
 Most importantly, separate:
 A. What is already confirmed
 B. What is only a possible future scenario
