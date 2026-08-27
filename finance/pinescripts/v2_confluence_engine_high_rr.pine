@@ -1,5 +1,5 @@
 //@version=6
-strategy("V3 Clean Confluence Engine — High R:R + Strong Confirmation",
+strategy("V3 Clean Confluence Engine — US Stocks (Risk + Trail)",
      overlay=true,
      pyramiding=0,
      initial_capital=100000,
@@ -7,40 +7,58 @@ strategy("V3 Clean Confluence Engine — High R:R + Strong Confirmation",
      commission_value=0.05,
      process_orders_on_close=true,
      calc_on_order_fills=true,
-     max_labels_count=100)
+     max_labels_count=100,
+     default_qty_type=strategy.cash,
+     default_qty_value=0)               // we calculate qty manually
 
 // ============================================================================
-// V3 CLEAN EDITION
-// The analysis engine stays behind the chart. The chart intentionally shows
-// ONLY: 4 decision levels + confirmed BUY/SELL + SL/T1/T2.
-// Designed for NIFTY and US stocks. Primary chart: 15M.
-// This is a research/backtest tool, not a profitability guarantee.
+// V3 CLEAN EDITION — US STOCKS
+// • Removed NIFTY-centric RS → now SPY + XLK (universal)
+// • Risk-based position sizing (default 0.75% of equity)
+// • 50% at T1 → remaining 50% trails (breakeven then ATR trail)
+// • Still only shows: 4 decision levels + confirmed BUY/SELL + SL/T1/T2
 // ============================================================================
 
-// ── Hidden brain / inputs
-minScore   = input.int(14, "Minimum confluence score", minval=8, maxval=20, group="Engine")
-minRR      = input.float(2.0, "Minimum R:R", minval=1.0, step=0.25, group="Engine")
+// ── Engine / Timeframes
+minScore   = input.int(12, "Minimum confluence score", minval=8, maxval=20, group="Engine")
+minRR      = input.float(2.0, "Minimum R:R to T2", minval=1.0, step=0.25, group="Engine")
 primaryTF  = input.timeframe("15", "Primary setup timeframe", group="Engine")
 htf        = input.timeframe("60", "Higher timeframe", group="Engine")
 confirmTF  = input.timeframe("5", "Confirmation timeframe", group="Engine")
+
+// ── Trend
 fastLen    = input.int(20, "Fast EMA", minval=2, group="Trend")
 slowLen    = input.int(50, "Slow EMA", minval=3, group="Trend")
 structureLen = input.int(20, "Structure lookback", minval=5, group="Trend")
+
+// ── Momentum
 rsiLen     = input.int(14, "RSI length", minval=2, group="Momentum")
 adxLen     = input.int(14, "ADX length", minval=2, group="Momentum")
 adxMin     = input.float(18, "ADX minimum", minval=5, step=1, group="Momentum")
-benchmark  = input.symbol("NSE:NIFTY", "Benchmark", group="Relative Strength")
-sectorSymbol = input.symbol("NSE:NIFTY_BANK", "Sector benchmark", group="Relative Strength")
-rsLen      = input.int(20, "RS lookback", minval=2, group="Relative Strength")
-volLen     = input.int(20, "Volume average", minval=2, group="Volume")
-volMultiplier = input.float(1.10, "Confirmation volume multiplier", minval=0.5, step=0.05, group="Volume")
-atrLen     = input.int(14, "ATR length", minval=2, group="Risk")
-stopATR    = input.float(1.0, "ATR stop component", minval=0.25, step=0.25, group="Risk")
-swingLen   = input.int(10, "Swing stop lookback", minval=2, group="Risk")
-targetR1   = input.float(2.0, "T1 R multiple", minval=0.5, step=0.25, group="Risk")
-targetR2   = input.float(3.0, "T2 R multiple", minval=1.0, step=0.25, group="Risk")
-useDarvas  = input.bool(false, "Use Darvas as secondary evidence", group="Optional")
-darvasLen  = input.int(20, "Darvas lookback", minval=5, group="Optional")
+
+// ── Relative Strength (now US-friendly)
+useRS          = input.bool(true, "Use Relative Strength filter", group="Relative Strength")
+benchmark      = input.symbol("SPY", "Benchmark", group="Relative Strength")
+sectorSymbol   = input.symbol("XLK", "Sector benchmark", group="Relative Strength")
+rsLen          = input.int(20, "RS lookback", minval=2, group="Relative Strength")
+
+// ── Volume
+volLen         = input.int(20, "Volume average", minval=2, group="Volume")
+volMultiplier  = input.float(1.10, "Confirmation volume multiplier", minval=0.5, step=0.05, group="Volume")
+
+// ── Risk & Trailing
+atrLen         = input.int(14, "ATR length", minval=2, group="Risk")
+stopATR        = input.float(1.0, "ATR stop component", minval=0.25, step=0.25, group="Risk")
+swingLen       = input.int(10, "Swing stop lookback", minval=2, group="Risk")
+targetR1       = input.float(2.0, "T1 R multiple", minval=0.5, step=0.25, group="Risk")
+targetR2       = input.float(3.0, "T2 R multiple", minval=1.0, step=0.25, group="Risk")
+riskPercent    = input.float(0.75, "Risk % of equity per trade", minval=0.1, maxval=3.0, step=0.05, group="Risk")
+trailAfterT1   = input.bool(true, "Trail remaining 50% after T1", group="Risk")
+trailATRmult   = input.float(1.5, "Trail ATR multiplier (after BE)", minval=0.5, step=0.1, group="Risk")
+
+// ── Optional
+useDarvas      = input.bool(false, "Use Darvas as secondary evidence", group="Optional")
+darvasLen      = input.int(20, "Darvas lookback", minval=5, group="Optional")
 
 f_safeDiv(a, b) => b == 0.0 ? 0.0 : a / b
 isPrimary = timeframe.period == primaryTF
@@ -51,12 +69,10 @@ emaSlow = ta.ema(close, slowLen)
 htfClose = request.security(syminfo.tickerid, htf, close, lookahead=barmerge.lookahead_off)
 htfFast  = request.security(syminfo.tickerid, htf, ta.ema(close, fastLen), lookahead=barmerge.lookahead_off)
 htfSlow  = request.security(syminfo.tickerid, htf, ta.ema(close, slowLen), lookahead=barmerge.lookahead_off)
-
 bullTrend = close > emaFast and emaFast > emaSlow
 bearTrend = close < emaFast and emaFast < emaSlow
 htfBull   = htfClose > htfFast and htfFast > htfSlow
 htfBear   = htfClose < htfFast and htfFast < htfSlow
-
 bullStructure = close > ta.highest(high[1], structureLen)
 bearStructure = close < ta.lowest(low[1], structureLen)
 
@@ -66,14 +82,14 @@ rsi = ta.rsi(close, rsiLen)
 bullMomentum = rsi > 52 and diPlus > diMinus and adx >= adxMin
 bearMomentum = rsi < 48 and diMinus > diPlus and adx >= adxMin
 
-// ── Relative strength
-benchClose = request.security(benchmark, timeframe.period, close, lookahead=barmerge.lookahead_off)
+// ── Relative Strength (universal)
+benchClose  = request.security(benchmark, timeframe.period, close, lookahead=barmerge.lookahead_off)
 sectorClose = request.security(sectorSymbol, timeframe.period, close, lookahead=barmerge.lookahead_off)
-stockROC = ta.roc(close, rsLen)
-benchROC = ta.roc(benchClose, rsLen)
+stockROC  = ta.roc(close, rsLen)
+benchROC  = ta.roc(benchClose, rsLen)
 sectorROC = ta.roc(sectorClose, rsLen)
-rsBull = stockROC > benchROC and stockROC > sectorROC
-rsBear = stockROC < benchROC and stockROC < sectorROC
+rsBull = not useRS or (stockROC > benchROC and stockROC > sectorROC)
+rsBear = not useRS or (stockROC < benchROC and stockROC < sectorROC)
 
 // ── VWAP
 vwapValue = ta.vwap(hlc3)
@@ -104,13 +120,13 @@ confirmVWAP  = request.security(syminfo.tickerid, confirmTF, ta.vwap(hlc3), look
 confirmBull = confirmClose > confirmVWAP
 confirmBear = confirmClose < confirmVWAP
 
-// ── Optional Darvas (never displayed)
+// ── Optional Darvas
 darvasHigh = ta.highest(high, darvasLen)
 darvasLow  = ta.lowest(low, darvasLen)
 darvasBull = useDarvas and close > darvasHigh[1]
 darvasBear = useDarvas and close < darvasLow[1]
 
-// ── Confluence score: hidden from chart
+// ── Confluence score
 int bullScore = 0
 int bearScore = 0
 bullScore += bullTrend ? 2 : 0
@@ -135,102 +151,138 @@ bearScore += confirmBear ? 2 : 0
 bearScore += bearSweep ? 1 : 0
 bearScore += darvasBear ? 1 : 0
 
-// ── Risk engine
+// ── Risk engine (initial candidates)
 atr = ta.atr(atrLen)
-longStopCandidate = math.min(ta.lowest(low, swingLen), close - atr * stopATR)
+longStopCandidate  = math.min(ta.lowest(low, swingLen), close - atr * stopATR)
 shortStopCandidate = math.max(ta.highest(high, swingLen), close + atr * stopATR)
-longRisk = close - longStopCandidate
+longRisk  = close - longStopCandidate
 shortRisk = shortStopCandidate - close
 longT1 = close + longRisk * targetR1
 longT2 = close + longRisk * targetR2
 shortT1 = close - shortRisk * targetR1
 shortT2 = close - shortRisk * targetR2
-longRR = f_safeDiv(longT2 - close, longRisk)
+longRR  = f_safeDiv(longT2 - close, longRisk)
 shortRR = f_safeDiv(close - shortT2, shortRisk)
 
 // ── Strong-confirmation trade triggers
-longConfirmation = bullAcceptance or bullRetest or (bullBreak and volumeBull and confirmBull)
+longConfirmation  = bullAcceptance or bullRetest or (bullBreak and volumeBull and confirmBull)
 shortConfirmation = bearAcceptance or bearRetest or (bearBreak and volumeBear and confirmBear)
-longSetup = isPrimary and bullScore >= minScore and longConfirmation and longRR >= minRR and htfBull and bullTrend
+longSetup  = isPrimary and bullScore >= minScore and longConfirmation and longRR >= minRR and htfBull and bullTrend
 shortSetup = isPrimary and bearScore >= minScore and shortConfirmation and shortRR >= minRR and htfBear and bearTrend
-longSignal = longSetup and not shortSetup
+longSignal  = longSetup and not shortSetup
 shortSignal = shortSetup and not longSetup
 
-// ── Orders / exits
-if longSignal and strategy.position_size <= 0
-    strategy.entry("LONG", strategy.long)
-if shortSignal and strategy.position_size >= 0
-    strategy.entry("SHORT", strategy.short)
+// ── Position sizing (risk-based)
+riskAmount = strategy.equity * (riskPercent / 100.0)
+longQty  = longRisk  > 0 ? riskAmount / longRisk  : na
+shortQty = shortRisk > 0 ? riskAmount / shortRisk : na
 
-activeLongStop = strategy.position_size > 0 ? math.min(ta.lowest(low, swingLen), strategy.position_avg_price - atr * stopATR) : na
-activeShortStop = strategy.position_size < 0 ? math.max(ta.highest(high, swingLen), strategy.position_avg_price + atr * stopATR) : na
-longRiskLive = strategy.position_size > 0 ? strategy.position_avg_price - activeLongStop : na
-shortRiskLive = strategy.position_size < 0 ? activeShortStop - strategy.position_avg_price : na
-liveLongT1 = strategy.position_size > 0 ? strategy.position_avg_price + longRiskLive * targetR1 : na
-liveLongT2 = strategy.position_size > 0 ? strategy.position_avg_price + longRiskLive * targetR2 : na
-liveShortT1 = strategy.position_size < 0 ? strategy.position_avg_price - shortRiskLive * targetR1 : na
-liveShortT2 = strategy.position_size < 0 ? strategy.position_avg_price - shortRiskLive * targetR2 : na
+// ── Entries
+if longSignal and strategy.position_size <= 0
+    strategy.entry("LONG", strategy.long, qty=longQty)
+if shortSignal and strategy.position_size >= 0
+    strategy.entry("SHORT", strategy.short, qty=shortQty)
+
+// ── Live risk management + trailing after T1
+var float activeLongStop  = na
+var float activeShortStop = na
+var bool  longT1hit       = false
+var bool  shortT1hit      = false
 
 if strategy.position_size > 0
+    // Initial stop
+    if strategy.position_size[1] <= 0
+        activeLongStop := math.min(ta.lowest(low, swingLen), strategy.position_avg_price - atr * stopATR)
+        longT1hit := false
+
+    longRiskLive = strategy.position_avg_price - activeLongStop
+    liveLongT1   = strategy.position_avg_price + longRiskLive * targetR1
+    liveLongT2   = strategy.position_avg_price + longRiskLive * targetR2
+
+    // Detect T1 hit (on close)
+    if not longT1hit and high >= liveLongT1
+        longT1hit := true
+        // Move stop to breakeven immediately
+        activeLongStop := strategy.position_avg_price
+
+    // Trail after T1
+    if trailAfterT1 and longT1hit
+        trailLevel = close - atr * trailATRmult
+        activeLongStop := math.max(activeLongStop, trailLevel)
+
+    // Exits
     strategy.exit("L-T1", "LONG", stop=activeLongStop, limit=liveLongT1, qty_percent=50)
     strategy.exit("L-T2", "LONG", stop=activeLongStop, limit=liveLongT2, qty_percent=50)
+
 if strategy.position_size < 0
+    if strategy.position_size[1] >= 0
+        activeShortStop := math.max(ta.highest(high, swingLen), strategy.position_avg_price + atr * stopATR)
+        shortT1hit := false
+
+    shortRiskLive = activeShortStop - strategy.position_avg_price
+    liveShortT1   = strategy.position_avg_price - shortRiskLive * targetR1
+    liveShortT2   = strategy.position_avg_price - shortRiskLive * targetR2
+
+    if not shortT1hit and low <= liveShortT1
+        shortT1hit := true
+        activeShortStop := strategy.position_avg_price
+
+    if trailAfterT1 and shortT1hit
+        trailLevel = close + atr * trailATRmult
+        activeShortStop := math.min(activeShortStop, trailLevel)
+
     strategy.exit("S-T1", "SHORT", stop=activeShortStop, limit=liveShortT1, qty_percent=50)
     strategy.exit("S-T2", "SHORT", stop=activeShortStop, limit=liveShortT2, qty_percent=50)
 
-// ============================================================================
-// CLEAN CHART OUTPUT
-// Only 4 levels + trade labels. No EMA, VWAP, boxes, score, dashboard, etc.
-// ============================================================================
+// Reset vars when flat
+if strategy.position_size == 0
+    activeLongStop  := na
+    activeShortStop := na
+    longT1hit       := false
+    shortT1hit      := false
 
-// Decision levels: nearest recent structure + previous-day reference.
+// ============================================================================
+// CLEAN CHART OUTPUT — only 4 levels + labels
+// ============================================================================
 prevHigh = request.security(syminfo.tickerid, "D", high[1], lookahead=barmerge.lookahead_off)
 prevLow  = request.security(syminfo.tickerid, "D", low[1], lookahead=barmerge.lookahead_off)
-
 recentResistance = ta.highest(high[1], 10)
-recentSupport = ta.lowest(low[1], 10)
-
-// Immediate levels are the nearest meaningful recent structure.
-// Strong levels use the previous-day extreme when it is farther away;
-// otherwise a wider 50-bar structure extreme is used.
-wideResistance = ta.highest(high[1], 50)
-wideSupport = ta.lowest(low[1], 50)
+recentSupport    = ta.lowest(low[1], 10)
+wideResistance   = ta.highest(high[1], 50)
+wideSupport      = ta.lowest(low[1], 50)
 
 float immediateResistance = recentResistance > close ? recentResistance : na
-float immediateSupport = recentSupport < close ? recentSupport : na
-
+float immediateSupport    = recentSupport < close ? recentSupport : na
 float strongResistance = na
-float strongSupport = na
+float strongSupport    = na
 
 if not na(immediateResistance)
     strongResistance := prevHigh > immediateResistance ? prevHigh : wideResistance
 else
     strongResistance := prevHigh > close ? prevHigh : wideResistance
-
 if not na(immediateSupport)
     strongSupport := prevLow < immediateSupport ? prevLow : wideSupport
 else
     strongSupport := prevLow < close ? prevLow : wideSupport
 
-// Ensure the displayed strong level is actually beyond the immediate level.
 if not na(immediateResistance) and not na(strongResistance) and strongResistance <= immediateResistance
     strongResistance := wideResistance
 if not na(immediateSupport) and not na(strongSupport) and strongSupport >= immediateSupport
     strongSupport := wideSupport
 
-// Four and only four horizontal decision lines.
 plot(immediateResistance, "Immediate Resistance", color=color.new(color.red, 15), linewidth=2, style=plot.style_linebr)
-plot(strongResistance, "Strong Resistance", color=color.new(color.red, 55), linewidth=2, style=plot.style_linebr)
-plot(immediateSupport, "Immediate Support", color=color.new(color.green, 15), linewidth=2, style=plot.style_linebr)
-plot(strongSupport, "Strong Support", color=color.new(color.green, 55), linewidth=2, style=plot.style_linebr)
+plot(strongResistance,    "Strong Resistance",    color=color.new(color.red, 55), linewidth=2, style=plot.style_linebr)
+plot(immediateSupport,    "Immediate Support",    color=color.new(color.green, 15), linewidth=2, style=plot.style_linebr)
+plot(strongSupport,       "Strong Support",       color=color.new(color.green, 55), linewidth=2, style=plot.style_linebr)
 
-// ── Signal labels: only appear after the complete confirmation rules fire.
+// Signal labels
 if longSignal
     label.new(bar_index, low,
          "BUY\nEntry " + str.tostring(close, format.mintick) +
          "\nSL " + str.tostring(longStopCandidate, format.mintick) +
          "\nT1 " + str.tostring(longT1, format.mintick) +
-         "\nT2 " + str.tostring(longT2, format.mintick),
+         "\nT2 " + str.tostring(longT2, format.mintick) +
+         "\nRisk " + str.tostring(riskPercent, "#.##") + "%",
          style=label.style_label_up, textcolor=color.white, color=color.green, size=size.small)
 
 if shortSignal
@@ -238,9 +290,10 @@ if shortSignal
          "SELL\nEntry " + str.tostring(close, format.mintick) +
          "\nSL " + str.tostring(shortStopCandidate, format.mintick) +
          "\nT1 " + str.tostring(shortT1, format.mintick) +
-         "\nT2 " + str.tostring(shortT2, format.mintick),
+         "\nT2 " + str.tostring(shortT2, format.mintick) +
+         "\nRisk " + str.tostring(riskPercent, "#.##") + "%",
          style=label.style_label_down, textcolor=color.white, color=color.red, size=size.small)
 
-// ── Alerts
-alertcondition(longSignal, "V3 BUY CONFIRMED", "V3 BUY confirmed on {{ticker}} {{interval}}")
+// Alerts
+alertcondition(longSignal,  "V3 BUY CONFIRMED",  "V3 BUY confirmed on {{ticker}} {{interval}}")
 alertcondition(shortSignal, "V3 SELL CONFIRMED", "V3 SELL confirmed on {{ticker}} {{interval}}")
