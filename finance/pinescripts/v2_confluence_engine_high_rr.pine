@@ -1,76 +1,51 @@
 //@version=6
-strategy("V2 Confluence Engine — High R:R + Strong Confirmation",
+strategy("V3 Clean Confluence Engine — High R:R + Strong Confirmation",
      overlay=true,
      pyramiding=0,
      initial_capital=100000,
      commission_type=strategy.commission.percent,
      commission_value=0.05,
      process_orders_on_close=true,
-     calc_on_order_fills=true)
+     calc_on_order_fills=true,
+     max_labels_count=100)
 
-//──────────────────────────────────────────────────────────────────────────────
-// V2 — 15M primary framework
-// Designed for NIFTY and US stocks.
-// Default profile: High R:R + Strong Confirmation.
-// This is a rules-based technical engine, not a profitability guarantee.
-//──────────────────────────────────────────────────────────────────────────────
+// ============================================================================
+// V3 CLEAN EDITION
+// The analysis engine stays behind the chart. The chart intentionally shows
+// ONLY: 4 decision levels + confirmed BUY/SELL + SL/T1/T2.
+// Designed for NIFTY and US stocks. Primary chart: 15M.
+// This is a research/backtest tool, not a profitability guarantee.
+// ============================================================================
 
-// === Inputs
-groupCore = "01 • Core"
-minScore       = input.int(14, "Minimum confluence score", minval=8, maxval=20, group=groupCore)
-minRR          = input.float(2.0, "Minimum R:R", minval=1.0, step=0.25, group=groupCore)
-primaryTF      = input.timeframe("15", "Primary setup timeframe", group=groupCore)
-htf            = input.timeframe("60", "Higher timeframe", group=groupCore)
-confirmTF      = input.timeframe("5", "Confirmation timeframe", group=groupCore)
-useSession     = input.bool(true, "Use regular-session filter", group=groupCore)
+// ── Hidden brain / inputs
+minScore   = input.int(14, "Minimum confluence score", minval=8, maxval=20, group="Engine")
+minRR      = input.float(2.0, "Minimum R:R", minval=1.0, step=0.25, group="Engine")
+primaryTF  = input.timeframe("15", "Primary setup timeframe", group="Engine")
+htf        = input.timeframe("60", "Higher timeframe", group="Engine")
+confirmTF  = input.timeframe("5", "Confirmation timeframe", group="Engine")
+fastLen    = input.int(20, "Fast EMA", minval=2, group="Trend")
+slowLen    = input.int(50, "Slow EMA", minval=3, group="Trend")
+structureLen = input.int(20, "Structure lookback", minval=5, group="Trend")
+rsiLen     = input.int(14, "RSI length", minval=2, group="Momentum")
+adxLen     = input.int(14, "ADX length", minval=2, group="Momentum")
+adxMin     = input.float(18, "ADX minimum", minval=5, step=1, group="Momentum")
+benchmark  = input.symbol("NSE:NIFTY", "Benchmark", group="Relative Strength")
+sectorSymbol = input.symbol("NSE:NIFTY_BANK", "Sector benchmark", group="Relative Strength")
+rsLen      = input.int(20, "RS lookback", minval=2, group="Relative Strength")
+volLen     = input.int(20, "Volume average", minval=2, group="Volume")
+volMultiplier = input.float(1.10, "Confirmation volume multiplier", minval=0.5, step=0.05, group="Volume")
+atrLen     = input.int(14, "ATR length", minval=2, group="Risk")
+stopATR    = input.float(1.0, "ATR stop component", minval=0.25, step=0.25, group="Risk")
+swingLen   = input.int(10, "Swing stop lookback", minval=2, group="Risk")
+targetR1   = input.float(2.0, "T1 R multiple", minval=0.5, step=0.25, group="Risk")
+targetR2   = input.float(3.0, "T2 R multiple", minval=1.0, step=0.25, group="Risk")
+useDarvas  = input.bool(false, "Use Darvas as secondary evidence", group="Optional")
+darvasLen  = input.int(20, "Darvas lookback", minval=5, group="Optional")
 
-groupTrend = "02 • Trend / Structure"
-fastLen        = input.int(20, "Fast EMA", minval=2, group=groupTrend)
-slowLen        = input.int(50, "Slow EMA", minval=3, group=groupTrend)
-structureLen   = input.int(20, "Structure lookback", minval=5, group=groupTrend)
-
-groupMomentum = "03 • Momentum"
-rsiLen         = input.int(14, "RSI length", minval=2, group=groupMomentum)
-adxLen         = input.int(14, "ADX length", minval=2, group=groupMomentum)
-adxMin         = input.float(18, "ADX minimum", minval=5, step=1, group=groupMomentum)
-
-groupRelative = "04 • Relative Strength"
-benchmark      = input.symbol("NSE:NIFTY", "Benchmark", group=groupRelative)
-sectorSymbol   = input.symbol("NSE:NIFTY_BANK", "Sector / comparison symbol", group=groupRelative)
-rsLen          = input.int(20, "RS lookback", minval=2, group=groupRelative)
-
-groupVWAP = "05 • VWAP"
-useVWAP         = input.bool(true, "Use VWAP filter", group=groupVWAP)
-useAnchoredVWAP = input.bool(false, "Use anchored VWAP proxy", group=groupVWAP)
-anchorLen       = input.int(50, "Anchored VWAP proxy length", minval=5, group=groupVWAP)
-
-groupVolume = "06 • Volume"
-volLen         = input.int(20, "Relative-volume lookback", minval=2, group=groupVolume)
-volMultiplier  = input.float(1.10, "Confirmation volume multiplier", minval=0.5, step=0.05, group=groupVolume)
-
-groupRisk = "07 • Risk / Targets"
-atrLen          = input.int(14, "ATR length", minval=2, group=groupRisk)
-stopATR         = input.float(1.0, "Minimum ATR stop component", minval=0.25, step=0.25, group=groupRisk)
-swingLen       = input.int(10, "Swing stop lookback", minval=2, group=groupRisk)
-targetR1        = input.float(2.0, "T1 R multiple", minval=0.5, step=0.25, group=groupRisk)
-targetR2        = input.float(3.0, "T2 R multiple", minval=1.0, step=0.25, group=groupRisk)
-
-groupOpening = "08 • Opening / Liquidity"
-openingMinutes = input.int(15, "Opening range minutes", minval=5, maxval=60, group=groupOpening)
-sweepLen       = input.int(10, "Liquidity sweep lookback", minval=2, group=groupOpening)
-
-groupDarvas = "09 • Optional Darvas"
-useDarvas      = input.bool(false, "Use Darvas as secondary evidence", group=groupDarvas)
-darvasLen      = input.int(20, "Darvas lookback", minval=5, group=groupDarvas)
-
-// === Helpers
-f_safeDiv(a, b) =>
-    b == 0.0 ? 0.0 : a / b
-
-// === Timeframe gate
+f_safeDiv(a, b) => b == 0.0 ? 0.0 : a / b
 isPrimary = timeframe.period == primaryTF
 
-// === Trend regime
+// ── Trend regime / structure
 emaFast = ta.ema(close, fastLen)
 emaSlow = ta.ema(close, slowLen)
 htfClose = request.security(syminfo.tickerid, htf, close, lookahead=barmerge.lookahead_off)
@@ -82,116 +57,62 @@ bearTrend = close < emaFast and emaFast < emaSlow
 htfBull   = htfClose > htfFast and htfFast > htfSlow
 htfBear   = htfClose < htfFast and htfFast < htfSlow
 
-hh = high > ta.highest(high[1], structureLen)
-ll = low < ta.lowest(low[1], structureLen)
 bullStructure = close > ta.highest(high[1], structureLen)
 bearStructure = close < ta.lowest(low[1], structureLen)
 
-// === Momentum
+// ── Momentum
 rsi = ta.rsi(close, rsiLen)
 [diPlus, diMinus, adx] = ta.dmi(adxLen, adxLen)
-
 bullMomentum = rsi > 52 and diPlus > diMinus and adx >= adxMin
 bearMomentum = rsi < 48 and diMinus > diPlus and adx >= adxMin
 
-// === Relative strength
+// ── Relative strength
 benchClose = request.security(benchmark, timeframe.period, close, lookahead=barmerge.lookahead_off)
 sectorClose = request.security(sectorSymbol, timeframe.period, close, lookahead=barmerge.lookahead_off)
-
-stockROC  = ta.roc(close, rsLen)
-benchROC  = ta.roc(benchClose, rsLen)
+stockROC = ta.roc(close, rsLen)
+benchROC = ta.roc(benchClose, rsLen)
 sectorROC = ta.roc(sectorClose, rsLen)
-
 rsBull = stockROC > benchROC and stockROC > sectorROC
 rsBear = stockROC < benchROC and stockROC < sectorROC
 
-// === VWAP
+// ── VWAP
 vwapValue = ta.vwap(hlc3)
-anchoredProxy = ta.vwma(hlc3, anchorLen)
+vwapBull = close > vwapValue and vwapValue >= vwapValue[1]
+vwapBear = close < vwapValue and vwapValue <= vwapValue[1]
 
-aboveVWAP = close > vwapValue
-belowVWAP = close < vwapValue
-
-vwapBull = aboveVWAP and vwapValue >= vwapValue[1]
-vwapBear = belowVWAP and vwapValue <= vwapValue[1]
-
-avwapBull = close > anchoredProxy
-avwapBear = close < anchoredProxy
-
-// === Volume
+// ── Volume
 volAvg = ta.sma(volume, volLen)
 relVol = f_safeDiv(volume, volAvg)
 volumeBull = close > open and relVol >= volMultiplier
 volumeBear = close < open and relVol >= volMultiplier
 
-// === ATR / volatility
-atr = ta.atr(atrLen)
-
-// === Previous day levels
-prevHigh = request.security(syminfo.tickerid, "D", high[1], lookahead=barmerge.lookahead_off)
-prevLow  = request.security(syminfo.tickerid, "D", low[1], lookahead=barmerge.lookahead_off)
-prevClose = request.security(syminfo.tickerid, "D", close[1], lookahead=barmerge.lookahead_off)
-
-// === Opening range (first N minutes of regular session)
-// Uses session-day reset; exchange session settings come from the chart symbol.
-newDay = ta.change(time("D")) != 0
-var float orHigh = na
-var float orLow = na
-var int dayStart = na
-
-if newDay
-    orHigh := high
-    orLow := low
-    dayStart := time
-else
-    if not na(dayStart) and (time - dayStart) < openingMinutes * 60 * 1000
-        orHigh := math.max(nz(orHigh, high), high)
-        orLow := math.min(nz(orLow, low), low)
-
-orReady = not na(orHigh) and not na(orLow) and not na(dayStart) and (time - dayStart) >= openingMinutes * 60 * 1000
-
-// === Liquidity sweep proxies
-priorHigh = ta.highest(high[1], sweepLen)
-priorLow  = ta.lowest(low[1], sweepLen)
-
+// ── Liquidity sweep / breakout / acceptance / retest
+priorHigh = ta.highest(high[1], structureLen)
+priorLow  = ta.lowest(low[1], structureLen)
 bullSweep = low < priorLow and close > priorLow
 bearSweep = high > priorHigh and close < priorHigh
+bullBreak = close > priorHigh
+bearBreak = close < priorLow
+bullAcceptance = bullBreak and close[1] > priorHigh[1] and volumeBull
+bearAcceptance = bearBreak and close[1] < priorLow[1] and volumeBear
+bullRetest = bullBreak[1] and low <= priorHigh[1] and close > priorHigh[1]
+bearRetest = bearBreak[1] and high >= priorLow[1] and close < priorLow[1]
 
-// === Breakout / breakdown confirmation
-breakoutLevel = ta.highest(high[1], structureLen)
-breakdownLevel = ta.lowest(low[1], structureLen)
-
-bullBreak = close > breakoutLevel
-bearBreak = close < breakdownLevel
-
-// Acceptance proxy: two consecutive closes beyond level, plus volume.
-bullAcceptance = bullBreak and close[1] > breakoutLevel[1] and volumeBull
-bearAcceptance = bearBreak and close[1] < breakdownLevel[1] and volumeBear
-
-// Retest proxy: current bar tests the broken level and closes back in direction.
-bullRetest = bullBreak[1] and low <= breakoutLevel[1] and close > breakoutLevel[1]
-bearRetest = bearBreak[1] and high >= breakdownLevel[1] and close < breakdownLevel[1]
-
-// === Optional Darvas secondary evidence
-darvasHigh = ta.highest(high, darvasLen)
-darvasLow  = ta.lowest(low, darvasLen)
-darvasBull = useDarvas and close > darvasHigh[1]
-darvasBear = useDarvas and close < darvasLow[1]
-
-// === Confirmation timeframe
+// ── Confirmation timeframe
 confirmClose = request.security(syminfo.tickerid, confirmTF, close, lookahead=barmerge.lookahead_off)
 confirmVWAP  = request.security(syminfo.tickerid, confirmTF, ta.vwap(hlc3), lookahead=barmerge.lookahead_off)
 confirmBull = confirmClose > confirmVWAP
 confirmBear = confirmClose < confirmVWAP
 
-// === Opening-session filter
-inRegularSession = not useSession or session.ismarket
+// ── Optional Darvas (never displayed)
+darvasHigh = ta.highest(high, darvasLen)
+darvasLow  = ta.lowest(low, darvasLen)
+darvasBull = useDarvas and close > darvasHigh[1]
+darvasBear = useDarvas and close < darvasLow[1]
 
-// === Confluence scoring
-// Max practical score is 20. Darvas is secondary and replaces no core condition.
+// ── Confluence score: hidden from chart
 int bullScore = 0
 int bearScore = 0
-
 bullScore += bullTrend ? 2 : 0
 bullScore += htfBull ? 2 : 0
 bullScore += bullMomentum ? 2 : 0
@@ -200,8 +121,8 @@ bullScore += vwapBull ? 2 : 0
 bullScore += volumeBull ? 2 : 0
 bullScore += (bullStructure or bullAcceptance or bullRetest) ? 2 : 0
 bullScore += confirmBull ? 2 : 0
-bullScore += (bullSweep or (orReady and close > orHigh)) ? 1 : 0
-bullScore += (useDarvas and darvasBull) ? 1 : 0
+bullScore += bullSweep ? 1 : 0
+bullScore += darvasBull ? 1 : 0
 
 bearScore += bearTrend ? 2 : 0
 bearScore += htfBear ? 2 : 0
@@ -211,51 +132,40 @@ bearScore += vwapBear ? 2 : 0
 bearScore += volumeBear ? 2 : 0
 bearScore += (bearStructure or bearAcceptance or bearRetest) ? 2 : 0
 bearScore += confirmBear ? 2 : 0
-bearScore += (bearSweep or (orReady and close < orLow)) ? 1 : 0
-bearScore += (useDarvas and darvasBear) ? 1 : 0
+bearScore += bearSweep ? 1 : 0
+bearScore += darvasBear ? 1 : 0
 
-// === Structural trade levels
-longStop = math.min(ta.lowest(low, swingLen), close - atr * stopATR)
-shortStop = math.max(ta.highest(high, swingLen), close + atr * stopATR)
-
-longRisk = close - longStop
-shortRisk = shortStop - close
-
+// ── Risk engine
+atr = ta.atr(atrLen)
+longStopCandidate = math.min(ta.lowest(low, swingLen), close - atr * stopATR)
+shortStopCandidate = math.max(ta.highest(high, swingLen), close + atr * stopATR)
+longRisk = close - longStopCandidate
+shortRisk = shortStopCandidate - close
 longT1 = close + longRisk * targetR1
 longT2 = close + longRisk * targetR2
 shortT1 = close - shortRisk * targetR1
 shortT2 = close - shortRisk * targetR2
-
 longRR = f_safeDiv(longT2 - close, longRisk)
 shortRR = f_safeDiv(close - shortT2, shortRisk)
 
-// === High-R:R + strong confirmation triggers
-// Primary timeframe is required for entries.
+// ── Strong-confirmation trade triggers
 longConfirmation = bullAcceptance or bullRetest or (bullBreak and volumeBull and confirmBull)
 shortConfirmation = bearAcceptance or bearRetest or (bearBreak and volumeBear and confirmBear)
-
-longSetup = isPrimary and inRegularSession and bullScore >= minScore and longConfirmation and longRR >= minRR and htfBull and bullTrend
-shortSetup = isPrimary and inRegularSession and bearScore >= minScore and shortConfirmation and shortRR >= minRR and htfBear and bearTrend
-
-// Prevent simultaneous opposite signals.
+longSetup = isPrimary and bullScore >= minScore and longConfirmation and longRR >= minRR and htfBull and bullTrend
+shortSetup = isPrimary and bearScore >= minScore and shortConfirmation and shortRR >= minRR and htfBear and bearTrend
 longSignal = longSetup and not shortSetup
 shortSignal = shortSetup and not longSetup
 
-// === Orders
+// ── Orders / exits
 if longSignal and strategy.position_size <= 0
     strategy.entry("LONG", strategy.long)
-
 if shortSignal and strategy.position_size >= 0
     strategy.entry("SHORT", strategy.short)
 
-// Dynamic exits based on signal-time structure.
-// Using strategy.position_avg_price after entry keeps levels tied to actual fills.
 activeLongStop = strategy.position_size > 0 ? math.min(ta.lowest(low, swingLen), strategy.position_avg_price - atr * stopATR) : na
 activeShortStop = strategy.position_size < 0 ? math.max(ta.highest(high, swingLen), strategy.position_avg_price + atr * stopATR) : na
-
 longRiskLive = strategy.position_size > 0 ? strategy.position_avg_price - activeLongStop : na
 shortRiskLive = strategy.position_size < 0 ? activeShortStop - strategy.position_avg_price : na
-
 liveLongT1 = strategy.position_size > 0 ? strategy.position_avg_price + longRiskLive * targetR1 : na
 liveLongT2 = strategy.position_size > 0 ? strategy.position_avg_price + longRiskLive * targetR2 : na
 liveShortT1 = strategy.position_size < 0 ? strategy.position_avg_price - shortRiskLive * targetR1 : na
@@ -264,102 +174,73 @@ liveShortT2 = strategy.position_size < 0 ? strategy.position_avg_price - shortRi
 if strategy.position_size > 0
     strategy.exit("L-T1", "LONG", stop=activeLongStop, limit=liveLongT1, qty_percent=50)
     strategy.exit("L-T2", "LONG", stop=activeLongStop, limit=liveLongT2, qty_percent=50)
-
 if strategy.position_size < 0
     strategy.exit("S-T1", "SHORT", stop=activeShortStop, limit=liveShortT1, qty_percent=50)
     strategy.exit("S-T2", "SHORT", stop=activeShortStop, limit=liveShortT2, qty_percent=50)
 
-// === Visuals
-plot(emaFast, "Fast EMA", linewidth=2)
-plot(emaSlow, "Slow EMA", linewidth=2)
-plot(useVWAP ? vwapValue : na, "VWAP", linewidth=2)
-plot(useAnchoredVWAP ? anchoredProxy : na, "Anchored VWAP proxy", linewidth=2)
+// ============================================================================
+// CLEAN CHART OUTPUT
+// Only 4 levels + trade labels. No EMA, VWAP, boxes, score, dashboard, etc.
+// ============================================================================
 
-plot(prevHigh, "Previous Day High", style=plot.style_linebr)
-plot(prevLow, "Previous Day Low", style=plot.style_linebr)
-plot(orReady ? orHigh : na, "Opening Range High", style=plot.style_linebr)
-plot(orReady ? orLow : na, "Opening Range Low", style=plot.style_linebr)
+// Decision levels: nearest recent structure + previous-day reference.
+prevHigh = request.security(syminfo.tickerid, "D", high[1], lookahead=barmerge.lookahead_off)
+prevLow  = request.security(syminfo.tickerid, "D", low[1], lookahead=barmerge.lookahead_off)
 
-plotshape(longSignal, title="LONG confirmation", style=shape.triangleup, location=location.belowbar, size=size.small, text="LONG")
-plotshape(shortSignal, title="SHORT confirmation", style=shape.triangledown, location=location.abovebar, size=size.small, text="SHORT")
+recentResistance = ta.highest(high[1], 10)
+recentSupport = ta.lowest(low[1], 10)
 
-// === Dashboard
-var table dash = table.new(position.top_right, 3, 17)
+// Immediate levels are the nearest meaningful recent structure.
+// Strong levels use the previous-day extreme when it is farther away;
+// otherwise a wider 50-bar structure extreme is used.
+wideResistance = ta.highest(high[1], 50)
+wideSupport = ta.lowest(low[1], 50)
 
-regimeText = htfBull and bullTrend ? "BULLISH" : htfBear and bearTrend ? "BEARISH" : "RANGE / TRANSITION"
-regimeScore = math.max(bullScore, bearScore)
-dominant = bullScore > bearScore ? "BULLISH" : bearScore > bullScore ? "BEARISH" : "MIXED"
+float immediateResistance = recentResistance > close ? recentResistance : na
+float immediateSupport = recentSupport < close ? recentSupport : na
 
-if barstate.islast
-    table.cell(dash, 0, 0, "V2 CONFLUENCE ENGINE")
-    table.cell(dash, 1, 0, syminfo.ticker)
-    table.cell(dash, 2, 0, "15M")
+float strongResistance = na
+float strongSupport = na
 
-    table.cell(dash, 0, 1, "REGIME")
-    table.cell(dash, 1, 1, regimeText)
-    table.cell(dash, 2, 1, str.tostring(regimeScore) + "/20")
+if not na(immediateResistance)
+    strongResistance := prevHigh > immediateResistance ? prevHigh : wideResistance
+else
+    strongResistance := prevHigh > close ? prevHigh : wideResistance
 
-    table.cell(dash, 0, 2, "TREND")
-    table.cell(dash, 1, 2, bullTrend ? "BULL" : bearTrend ? "BEAR" : "MIXED")
-    table.cell(dash, 2, 2, htfBull ? "HTF BULL" : htfBear ? "HTF BEAR" : "HTF MIXED")
+if not na(immediateSupport)
+    strongSupport := prevLow < immediateSupport ? prevLow : wideSupport
+else
+    strongSupport := prevLow < close ? prevLow : wideSupport
 
-    table.cell(dash, 0, 3, "MOMENTUM")
-    table.cell(dash, 1, 3, bullMomentum ? "BULL" : bearMomentum ? "BEAR" : "WEAK/MIXED")
-    table.cell(dash, 2, 3, "RSI " + str.tostring(rsi, "#.0"))
+// Ensure the displayed strong level is actually beyond the immediate level.
+if not na(immediateResistance) and not na(strongResistance) and strongResistance <= immediateResistance
+    strongResistance := wideResistance
+if not na(immediateSupport) and not na(strongSupport) and strongSupport >= immediateSupport
+    strongSupport := wideSupport
 
-    table.cell(dash, 0, 4, "REL STRENGTH")
-    table.cell(dash, 1, 4, rsBull ? "STRONG" : rsBear ? "WEAK" : "MIXED")
-    table.cell(dash, 2, 4, str.tostring(stockROC, "#.1") + "%")
+// Four and only four horizontal decision lines.
+plot(immediateResistance, "Immediate Resistance", color=color.new(color.red, 15), linewidth=2, style=plot.style_linebr)
+plot(strongResistance, "Strong Resistance", color=color.new(color.red, 55), linewidth=2, style=plot.style_linebr)
+plot(immediateSupport, "Immediate Support", color=color.new(color.green, 15), linewidth=2, style=plot.style_linebr)
+plot(strongSupport, "Strong Support", color=color.new(color.green, 55), linewidth=2, style=plot.style_linebr)
 
-    table.cell(dash, 0, 5, "VWAP")
-    table.cell(dash, 1, 5, aboveVWAP ? "ABOVE" : "BELOW")
-    table.cell(dash, 2, 5, "RS " + str.tostring(relVol, "#.2"))
+// ── Signal labels: only appear after the complete confirmation rules fire.
+if longSignal
+    label.new(bar_index, low,
+         "BUY\nEntry " + str.tostring(close, format.mintick) +
+         "\nSL " + str.tostring(longStopCandidate, format.mintick) +
+         "\nT1 " + str.tostring(longT1, format.mintick) +
+         "\nT2 " + str.tostring(longT2, format.mintick),
+         style=label.style_label_up, textcolor=color.white, color=color.green, size=size.small)
 
-    table.cell(dash, 0, 6, "VOLUME")
-    table.cell(dash, 1, 6, relVol >= volMultiplier ? "CONFIRMING" : "NORMAL/WEAK")
-    table.cell(dash, 2, 6, str.tostring(relVol, "#.2") + "x")
+if shortSignal
+    label.new(bar_index, high,
+         "SELL\nEntry " + str.tostring(close, format.mintick) +
+         "\nSL " + str.tostring(shortStopCandidate, format.mintick) +
+         "\nT1 " + str.tostring(shortT1, format.mintick) +
+         "\nT2 " + str.tostring(shortT2, format.mintick),
+         style=label.style_label_down, textcolor=color.white, color=color.red, size=size.small)
 
-    table.cell(dash, 0, 7, "BREAKOUT")
-    table.cell(dash, 1, 7, bullAcceptance ? "BULL CONF" : bearAcceptance ? "BEAR CONF" : "NONE")
-    table.cell(dash, 2, 7, bullRetest ? "BULL RETEST" : bearRetest ? "BEAR RETEST" : "WAIT")
-
-    table.cell(dash, 0, 8, "CONFIRM TF")
-    table.cell(dash, 1, 8, confirmBull ? "BULL" : confirmBear ? "BEAR" : "MIXED")
-    table.cell(dash, 2, 8, confirmTF)
-
-    table.cell(dash, 0, 9, "BULL SCORE")
-    table.cell(dash, 1, 9, str.tostring(bullScore) + "/20")
-    table.cell(dash, 2, 9, bullScore >= minScore ? "QUALIFIED" : "WAIT")
-
-    table.cell(dash, 0, 10, "BEAR SCORE")
-    table.cell(dash, 1, 10, str.tostring(bearScore) + "/20")
-    table.cell(dash, 2, 10, bearScore >= minScore ? "QUALIFIED" : "WAIT")
-
-    table.cell(dash, 0, 11, "A SAFEST")
-    table.cell(dash, 1, 11, longSignal ? "LONG" : shortSignal ? "SHORT" : "WAIT")
-    table.cell(dash, 2, 11, "Strongest confirm")
-
-    table.cell(dash, 0, 12, "B HIGH R:R")
-    table.cell(dash, 1, 12, longSignal ? "LONG" : shortSignal ? "SHORT" : "WAIT")
-    table.cell(dash, 2, 12, "DEFAULT")
-
-    table.cell(dash, 0, 13, "C BALANCED")
-    table.cell(dash, 1, 13, dominant)
-    table.cell(dash, 2, 13, "WAIT/CONFIRM")
-
-    table.cell(dash, 0, 14, "TRADE")
-    table.cell(dash, 1, 14, longSignal ? "LONG" : shortSignal ? "SHORT" : "WAIT")
-    table.cell(dash, 2, 14, "Min R:R " + str.tostring(minRR, "#.##"))
-
-    table.cell(dash, 0, 15, "LEVELS")
-    table.cell(dash, 1, 15, longSignal ? "SL " + str.tostring(longStop, format.mintick) : shortSignal ? "SL " + str.tostring(shortStop, format.mintick) : "—")
-    table.cell(dash, 2, 15, longSignal ? "T2 " + str.tostring(longT2, format.mintick) : shortSignal ? "T2 " + str.tostring(shortT2, format.mintick) : "—")
-
-    table.cell(dash, 0, 16, "STATUS")
-    table.cell(dash, 1, 16, longSignal ? "LONG CONFIRMED" : shortSignal ? "SHORT CONFIRMED" : "WAIT")
-    table.cell(dash, 2, 16, "No chase")
-
-// === Alerts
-alertcondition(longSignal, "V2 LONG CONFIRMED", "V2 High R:R + Strong Confirmation LONG on {{ticker}} {{interval}}")
-alertcondition(shortSignal, "V2 SHORT CONFIRMED", "V2 High R:R + Strong Confirmation SHORT on {{ticker}} {{interval}}")
-alertcondition(not longSignal and not shortSignal and bullScore >= minScore and bearScore >= minScore, "V2 CONFLICT / WAIT", "V2 conflict: both directions qualified; WAIT on {{ticker}}")
+// ── Alerts
+alertcondition(longSignal, "V3 BUY CONFIRMED", "V3 BUY confirmed on {{ticker}} {{interval}}")
+alertcondition(shortSignal, "V3 SELL CONFIRMED", "V3 SELL confirmed on {{ticker}} {{interval}}")
