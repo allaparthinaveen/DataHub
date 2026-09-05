@@ -1,0 +1,101 @@
+//@version=6
+indicator("ZLEMA + VWAP Buy/Sell Signals (Filtered v2)", overlay=true)
+
+// === Trend MA Inputs ===
+fastLength   = input.int(12, "Fast EMA Length", group="Trend MA")
+useZLEMA     = input.bool(false, "Use ZLEMA (otherwise DEMA)", group="Trend MA")
+
+// === Multi-timeframe Trend Filter Inputs ===
+// NOTE: each TF gets its OWN ema length now - a 50-period EMA means very
+// different real time on weekly (~1yr) vs daily (~2.5mo) vs 1H (~2 days).
+// Tune these to match how fast you actually want each TF to react.
+weeklyTF         = input.timeframe("W", "Weekly Timeframe", group="Multi-TF Trend Filter")
+weeklyEmaLength  = input.int(10, "Weekly EMA Length", group="Multi-TF Trend Filter")
+dailyTF          = input.timeframe("D", "Daily Timeframe", group="Multi-TF Trend Filter")
+dailyEmaLength   = input.int(20, "Daily EMA Length", group="Multi-TF Trend Filter")
+useHtf1Filter    = input.bool(true, "Include 1H Filter (turn OFF if chart TF >= 1H)", group="Multi-TF Trend Filter")
+htf1TF           = input.timeframe("60", "1H Timeframe", group="Multi-TF Trend Filter")
+htf1EmaLength    = input.int(50, "1H EMA Length", group="Multi-TF Trend Filter")
+
+// === ADX/DI Trend Strength Filter Inputs ===
+adxLength      = input.int(14, "ADX/DI Length", group="Trend Strength Filter")
+adxSmoothing   = input.int(14, "ADX Smoothing", group="Trend Strength Filter")
+adxThreshold   = input.int(20, "Minimum ADX", group="Trend Strength Filter")
+
+// === RSI Overbought/Oversold Filter Inputs ===
+rsiLength      = input.int(14, "RSI Length", group="RSI Filter")
+rsiOverbought  = input.int(70, "RSI Overbought Level", group="RSI Filter")
+rsiOversold    = input.int(30, "RSI Oversold Level", group="RSI Filter")
+
+// === Functions ===
+demaFunc(src, length) =>
+    ema1 = ta.ema(src, length)
+    ema2 = ta.ema(ema1, length)
+    2 * ema1 - ema2
+
+zlemaFunc(src, length) =>
+    offset = int(math.round((length - 1) / 2))
+    prev = nz(src[offset])
+    shifted = src + (src - prev)
+    ta.ema(shifted, length)
+
+f_trendUp(length) =>
+    close > ta.ema(close, length)
+
+// === Trend MA (DEMA or ZLEMA) ===
+trendMA = useZLEMA ? zlemaFunc(close, fastLength) : demaFunc(close, fastLength)
+
+// === VWAP ===
+vwapValue = ta.vwap
+
+// === Multi-timeframe Trend Alignment (separate EMA length per TF) ===
+weeklyTrendUp = request.security(syminfo.tickerid, weeklyTF, f_trendUp(weeklyEmaLength), lookahead=barmerge.lookahead_off)
+dailyTrendUp  = request.security(syminfo.tickerid, dailyTF,  f_trendUp(dailyEmaLength),  lookahead=barmerge.lookahead_off)
+htf1TrendUp   = request.security(syminfo.tickerid, htf1TF,   f_trendUp(htf1EmaLength),   lookahead=barmerge.lookahead_off)
+
+trendAlignedUp   = weeklyTrendUp and dailyTrendUp and (not useHtf1Filter or htf1TrendUp)
+trendAlignedDown = (not weeklyTrendUp) and (not dailyTrendUp) and (not useHtf1Filter or not htf1TrendUp)
+
+// === ADX / DI Trend Strength ===
+[diPlus, diMinus, adxValue] = ta.dmi(adxLength, adxSmoothing)
+adxStrongUp   = adxValue >= adxThreshold and diPlus > diMinus
+adxStrongDown = adxValue >= adxThreshold and diMinus > diPlus
+
+// === RSI Overbought / Oversold ===
+rsiValue      = ta.rsi(close, rsiLength)
+notOverbought = rsiValue < rsiOverbought
+notOversold   = rsiValue > rsiOversold
+
+// === Raw Crossover Signals (original logic) ===
+rawBuy  = ta.crossover(close, trendMA)  and ta.crossover(close, vwapValue)
+rawSell = ta.crossunder(close, trendMA) and ta.crossunder(close, vwapValue)
+
+// === Final Filtered Signals ===
+buySignal  = rawBuy  and trendAlignedUp   and adxStrongUp   and notOverbought
+sellSignal = rawSell and trendAlignedDown and adxStrongDown and notOversold
+
+// === Plots ===
+plot(trendMA, color=color.yellow, title="Trend MA (DEMA/ZLEMA)", linewidth=2)
+plot(vwapValue, color=color.blue, title="VWAP", linewidth=2)
+
+// Buy/Sell markers
+plotshape(buySignal,  title="Buy Signal",  location=location.belowbar, color=color.green, style=shape.triangleup, size=size.small, text="BUY")
+plotshape(sellSignal, title="Sell Signal", location=location.abovebar, color=color.red, style=shape.triangledown, size=size.small, text="SELL")
+
+// Background tint showing when trend alignment currently permits trades
+bgcolor(trendAlignedUp ? color.new(color.green, 92) : trendAlignedDown ? color.new(color.red, 92) : na)
+
+// === DEBUG - hover any candle in Data Window to see exactly what blocked a signal ===
+plot(rawBuy  ? 1 : 0, title="DBG: Raw Buy (unfiltered)",  display=display.data_window)
+plot(rawSell ? 1 : 0, title="DBG: Raw Sell (unfiltered)", display=display.data_window)
+plot(weeklyTrendUp ? 1 : 0, title="DBG: Weekly Trend Up", display=display.data_window)
+plot(dailyTrendUp  ? 1 : 0, title="DBG: Daily Trend Up",  display=display.data_window)
+plot(htf1TrendUp   ? 1 : 0, title="DBG: 1H Trend Up",     display=display.data_window)
+plot(adxValue, title="DBG: ADX Value", display=display.data_window)
+plot(adxStrongDown ? 1 : 0, title="DBG: ADX Strong Down", display=display.data_window)
+plot(rsiValue, title="DBG: RSI Value", display=display.data_window)
+plot(notOversold ? 1 : 0, title="DBG: Not Oversold", display=display.data_window)
+
+// Alerts
+alertcondition(buySignal, title="Filtered Buy Signal", message="ZLEMA+VWAP Buy signal confirmed")
+alertcondition(sellSignal, title="Filtered Sell Signal", message="ZLEMA+VWAP Sell signal confirmed")
