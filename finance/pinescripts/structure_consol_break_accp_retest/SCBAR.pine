@@ -1,0 +1,773 @@
+//@version=6
+indicator("Structure → Consolidation → Breakout → Acceptance → Retest",
+     overlay=true,
+     max_boxes_count=10,
+     max_lines_count=50,
+     max_labels_count=100)
+
+//────────────────────────────────────────────
+// INPUTS
+//────────────────────────────────────────────
+
+pivotLen       = input.int(3, "Swing Length", minval=1)
+minTrendSwings = input.int(2, "Minimum Trend Swings", minval=1)
+
+minConsBars    = input.int(5, "Minimum Consolidation Bars", minval=2)
+maxConsBars    = input.int(40, "Maximum Consolidation Bars", minval=5)
+maxBoxPct      = input.float(8.0, "Maximum Box Range %", minval=0.5, step=0.5)
+
+// Breakout
+breakoutBuffer = input.float(0.10, "Breakout Buffer %", minval=0.0, step=0.05)
+
+// Acceptance
+acceptBars     = input.int(1, "Acceptance Bars After Breakout", minval=1, maxval=3)
+
+// Retest
+retestBars     = input.int(10, "Maximum Bars To Wait For Retest", minval=1)
+retestBuffer   = input.float(0.25, "Retest Zone Buffer %", minval=0.0, step=0.05)
+
+// Visuals
+showStructure  = input.bool(true, "Show HH / HL / LH / LL")
+showTrendLine  = input.bool(true, "Show Trend Line")
+showBox        = input.bool(true, "Show Consolidation Box")
+showLevels     = input.bool(true, "Show Support / Resistance")
+showBreakout   = input.bool(true, "Show Breakout")
+showAcceptance = input.bool(true, "Show Acceptance")
+showRetest     = input.bool(true, "Show Retest")
+showEntry      = input.bool(true, "Show Entry")
+
+//────────────────────────────────────────────
+// COLORS
+//────────────────────────────────────────────
+
+trendUpColor   = color.new(color.green, 0)
+trendDownColor = color.new(color.red, 0)
+
+boxColor       = color.new(color.purple, 85)
+boxBorder      = color.new(color.purple, 0)
+
+supportColor   = color.new(color.teal, 0)
+resistColor    = color.new(color.teal, 0)
+
+breakoutUpColor   = color.new(color.green, 0)
+breakoutDownColor = color.new(color.red, 0)
+
+acceptColor = color.new(color.blue, 0)
+retestColor = color.new(color.orange, 0)
+
+//────────────────────────────────────────────
+// SWING DETECTION
+//────────────────────────────────────────────
+
+ph = ta.pivothigh(high, pivotLen, pivotLen)
+pl = ta.pivotlow(low, pivotLen, pivotLen)
+
+// Previous / current swing highs
+var float prevHigh = na
+var float lastHigh = na
+var int prevHighBar = na
+var int lastHighBar = na
+
+// Previous / current swing lows
+var float prevLow = na
+var float lastLow = na
+var int prevLowBar = na
+var int lastLowBar = na
+
+//────────────────────────────────────────────
+// STRUCTURE FLAGS
+//────────────────────────────────────────────
+
+var bool newHH = false
+var bool newLH = false
+var bool newHL = false
+var bool newLL = false
+
+newHH := false
+newLH := false
+newHL := false
+newLL := false
+
+// Swing high
+if not na(ph)
+
+    prevHigh := lastHigh
+    prevHighBar := lastHighBar
+
+    lastHigh := ph
+    lastHighBar := bar_index - pivotLen
+
+    if not na(prevHigh)
+
+        if lastHigh > prevHigh
+            newHH := true
+
+        else if lastHigh < prevHigh
+            newLH := true
+
+// Swing low
+if not na(pl)
+
+    prevLow := lastLow
+    prevLowBar := lastLowBar
+
+    lastLow := pl
+    lastLowBar := bar_index - pivotLen
+
+    if not na(prevLow)
+
+        if lastLow > prevLow
+            newHL := true
+
+        else if lastLow < prevLow
+            newLL := true
+
+//────────────────────────────────────────────
+// TREND STRUCTURE
+//────────────────────────────────────────────
+
+var int trend = 0
+//  1 = bullish
+// -1 = bearish
+//  0 = undefined
+
+var int hhCount = 0
+var int hlCount = 0
+var int lhCount = 0
+var int llCount = 0
+
+if newHH
+    hhCount += 1
+    lhCount := 0
+
+if newHL
+    hlCount += 1
+
+if newLH
+    lhCount += 1
+    hhCount := 0
+
+if newLL
+    llCount += 1
+
+// Confirm bullish structure
+if hhCount >= minTrendSwings and hlCount >= minTrendSwings
+    trend := 1
+
+// Confirm bearish structure
+if lhCount >= minTrendSwings and llCount >= minTrendSwings
+    trend := -1
+
+//────────────────────────────────────────────
+// STRUCTURE LABELS
+//────────────────────────────────────────────
+
+if showStructure
+
+    if newHH
+        label.new(
+             bar_index - pivotLen,
+             ph,
+             "HH",
+             style=label.style_label_down,
+             color=trendUpColor,
+             textcolor=color.white,
+             size=size.tiny)
+
+    if newLH
+        label.new(
+             bar_index - pivotLen,
+             ph,
+             "LH",
+             style=label.style_label_down,
+             color=trendDownColor,
+             textcolor=color.white,
+             size=size.tiny)
+
+    if newHL
+        label.new(
+             bar_index - pivotLen,
+             pl,
+             "HL",
+             style=label.style_label_up,
+             color=trendUpColor,
+             textcolor=color.white,
+             size=size.tiny)
+
+    if newLL
+        label.new(
+             bar_index - pivotLen,
+             pl,
+             "LL",
+             style=label.style_label_up,
+             color=trendDownColor,
+             textcolor=color.white,
+             size=size.tiny)
+
+//────────────────────────────────────────────
+// TREND CHANGE DETECTION
+//────────────────────────────────────────────
+
+var int previousTrend = 0
+
+trendChanged =
+     trend != 0 and
+     trend != previousTrend
+
+newBullTrend =
+     trendChanged and trend == 1
+
+newBearTrend =
+     trendChanged and trend == -1
+
+//────────────────────────────────────────────
+// SETUP STATE
+//────────────────────────────────────────────
+
+// 0 = Waiting for consolidation
+// 1 = Consolidation
+// 2 = Breakout / waiting for acceptance
+// 3 = Accepted / waiting for retest
+
+var int setupState = 0
+
+// This is the critical lock.
+// Once a trend cycle has produced a setup,
+// another box cannot be created until a NEW trend appears.
+
+var bool trendCycleUsed = false
+
+//────────────────────────────────────────────
+// BOX / LEVEL VARIABLES
+//────────────────────────────────────────────
+
+var int consStartBar = na
+
+var float resistance = na
+var float support = na
+
+var box consBox = na
+var line resistanceLine = na
+var line supportLine = na
+
+//────────────────────────────────────────────
+// ACCEPTANCE VARIABLES
+//────────────────────────────────────────────
+
+var int acceptanceCount = 0
+var int breakoutBar = na
+
+//────────────────────────────────────────────
+// RETEST VARIABLES
+//────────────────────────────────────────────
+
+var int retestStartBar = na
+
+//────────────────────────────────────────────
+// RESET ONLY ON NEW STRUCTURAL TREND
+//────────────────────────────────────────────
+
+if newBullTrend or newBearTrend
+
+    // Delete previous visual setup.
+    // This guarantees only ONE visible box exists.
+
+    if not na(consBox)
+        box.delete(consBox)
+
+    if not na(resistanceLine)
+        line.delete(resistanceLine)
+
+    if not na(supportLine)
+        line.delete(supportLine)
+
+    consBox := na
+    resistanceLine := na
+    supportLine := na
+
+    resistance := na
+    support := na
+
+    consStartBar := na
+
+    acceptanceCount := 0
+    breakoutBar := na
+    retestStartBar := na
+
+    setupState := 0
+
+    // New trend = new opportunity
+    trendCycleUsed := false
+
+//────────────────────────────────────────────
+// TREND LINE
+//────────────────────────────────────────────
+
+var line trendLine = na
+
+if showTrendLine
+
+    if trend == 1 and newHL and not na(prevLowBar)
+
+        if not na(trendLine)
+            line.delete(trendLine)
+
+        trendLine := line.new(
+             prevLowBar,
+             prevLow,
+             lastLowBar,
+             lastLow,
+             extend=extend.right,
+             color=trendUpColor,
+             width=2)
+
+    if trend == -1 and newLH and not na(prevHighBar)
+
+        if not na(trendLine)
+            line.delete(trendLine)
+
+        trendLine := line.new(
+             prevHighBar,
+             prevHigh,
+             lastHighBar,
+             lastHigh,
+             extend=extend.right,
+             color=trendDownColor,
+             width=2)
+
+//────────────────────────────────────────────
+// CONSOLIDATION DETECTION
+//────────────────────────────────────────────
+
+recentHigh = ta.highest(high, minConsBars)
+recentLow  = ta.lowest(low, minConsBars)
+
+recentMid = (recentHigh + recentLow) / 2.0
+
+rangePct =
+     recentMid != 0 ?
+     ((recentHigh - recentLow) / recentMid) * 100 :
+     999
+
+isTightRange =
+     rangePct <= maxBoxPct
+
+// CRITICAL:
+// A new box can only appear when:
+// 1. A trend exists
+// 2. There is no active setup
+// 3. This trend cycle has NOT already been used
+
+canStartConsolidation =
+     trend != 0 and
+     setupState == 0 and
+     not trendCycleUsed and
+     isTightRange
+
+//────────────────────────────────────────────
+// CREATE ONE CONSOLIDATION BOX
+//────────────────────────────────────────────
+
+if canStartConsolidation
+
+    setupState := 1
+    trendCycleUsed := true
+
+    consStartBar := bar_index - minConsBars + 1
+
+    resistance := recentHigh
+    support := recentLow
+
+    // ONE BOX ONLY
+    if showBox
+
+        consBox := box.new(
+             left=consStartBar,
+             top=resistance,
+             right=bar_index,
+             bottom=support,
+             border_color=boxBorder,
+             bgcolor=boxColor,
+             border_width=2)
+
+    // ONE pair of horizontal levels
+    if showLevels
+
+        resistanceLine := line.new(
+             consStartBar,
+             resistance,
+             bar_index,
+             resistance,
+             color=resistColor,
+             width=2)
+
+        supportLine := line.new(
+             consStartBar,
+             support,
+             bar_index,
+             support,
+             color=supportColor,
+             width=2)
+
+//────────────────────────────────────────────
+// ACTIVE CONSOLIDATION
+//────────────────────────────────────────────
+
+if setupState == 1
+
+    consBars =
+         bar_index - consStartBar + 1
+
+    // Extend box
+    if showBox and not na(consBox)
+        box.set_right(consBox, bar_index)
+
+    // Extend S/R
+    if showLevels
+
+        if not na(resistanceLine)
+            line.set_x2(resistanceLine, bar_index)
+
+        if not na(supportLine)
+            line.set_x2(supportLine, bar_index)
+
+    //────────────────────────────────────────
+    // BREAKOUT DETECTION
+    //────────────────────────────────────────
+
+    bullishBreakout =
+         close >
+         resistance * (1 + breakoutBuffer / 100)
+
+    bearishBreakout =
+         close <
+         support * (1 - breakoutBuffer / 100)
+
+    // Bullish breakout
+    if trend == 1 and bullishBreakout
+
+        setupState := 2
+
+        breakoutBar := bar_index
+        acceptanceCount := 0
+
+        if showBreakout
+
+            label.new(
+                 bar_index,
+                 low,
+                 "BREAKOUT ↑",
+                 style=label.style_label_up,
+                 color=breakoutUpColor,
+                 textcolor=color.white,
+                 size=size.small)
+
+    // Bearish breakout
+    else if trend == -1 and bearishBreakout
+
+        setupState := 2
+
+        breakoutBar := bar_index
+        acceptanceCount := 0
+
+        if showBreakout
+
+            label.new(
+                 bar_index,
+                 high,
+                 "BREAKDOWN ↓",
+                 style=label.style_label_down,
+                 color=breakoutDownColor,
+                 textcolor=color.white,
+                 size=size.small)
+
+    //────────────────────────────────────────
+    // CONSOLIDATION EXPIRY
+    //────────────────────────────────────────
+
+    if consBars > maxConsBars
+
+        if not na(consBox)
+            box.delete(consBox)
+
+        if not na(resistanceLine)
+            line.delete(resistanceLine)
+
+        if not na(supportLine)
+            line.delete(supportLine)
+
+        consBox := na
+        resistanceLine := na
+        supportLine := na
+
+        setupState := 0
+
+//────────────────────────────────────────────
+// ACCEPTANCE
+//────────────────────────────────────────────
+
+if setupState == 2
+
+    // IMPORTANT:
+    // Do NOT evaluate acceptance on the breakout candle.
+    // Acceptance starts from the NEXT candle.
+
+    isPostBreakoutBar =
+         bar_index > breakoutBar
+
+    if isPostBreakoutBar
+
+        //────────────────────────────────────
+        // BULLISH ACCEPTANCE
+        //────────────────────────────────────
+
+        if trend == 1
+
+            if close > resistance
+
+                acceptanceCount += 1
+
+                if acceptanceCount >= acceptBars
+
+                    setupState := 3
+
+                    retestStartBar := bar_index
+
+                    if showAcceptance
+
+                        label.new(
+                             bar_index,
+                             low,
+                             "ACCEPTED ✓",
+                             style=label.style_label_up,
+                             color=acceptColor,
+                             textcolor=color.white,
+                             size=size.tiny)
+
+            else
+
+                // Returned into the box.
+                // Breakout failed.
+
+                if close <= resistance
+
+                    if showBreakout
+
+                        label.new(
+                             bar_index,
+                             high,
+                             "FAILED",
+                             style=label.style_label_down,
+                             color=color.gray,
+                             textcolor=color.white,
+                             size=size.tiny)
+
+                    setupState := 0
+
+                    acceptanceCount := 0
+
+        //────────────────────────────────────
+        // BEARISH ACCEPTANCE
+        //────────────────────────────────────
+
+        else if trend == -1
+
+            if close < support
+
+                acceptanceCount += 1
+
+                if acceptanceCount >= acceptBars
+
+                    setupState := 3
+
+                    retestStartBar := bar_index
+
+                    if showAcceptance
+
+                        label.new(
+                             bar_index,
+                             high,
+                             "ACCEPTED ✓",
+                             style=label.style_label_down,
+                             color=acceptColor,
+                             textcolor=color.white,
+                             size=size.tiny)
+
+            else
+
+                // Returned into the box.
+                // Breakdown failed.
+
+                if close >= support
+
+                    if showBreakout
+
+                        label.new(
+                             bar_index,
+                             low,
+                             "FAILED",
+                             style=label.style_label_up,
+                             color=color.gray,
+                             textcolor=color.white,
+                             size=size.tiny)
+
+                    setupState := 0
+
+                    acceptanceCount := 0
+
+//────────────────────────────────────────────
+// RETEST
+//────────────────────────────────────────────
+
+var bool longEntry = false
+var bool shortEntry = false
+
+longEntry := false
+shortEntry := false
+
+if setupState == 3
+
+    // CRITICAL:
+    // Retest must happen AFTER acceptance.
+    // It cannot happen on the acceptance candle.
+
+    isAfterAcceptance =
+         bar_index > retestStartBar
+
+    if isAfterAcceptance
+
+        barsSinceAcceptance =
+             bar_index - retestStartBar
+
+        //────────────────────────────────────
+        // BULLISH RETEST
+        //────────────────────────────────────
+
+        bullishRetestTouched =
+             low <= resistance *
+             (1 + retestBuffer / 100)
+
+        bullishRetestHeld =
+             close > resistance
+
+        bullishRetest =
+             trend == 1 and
+             bullishRetestTouched and
+             bullishRetestHeld
+
+        //────────────────────────────────────
+        // BEARISH RETEST
+        //────────────────────────────────────
+
+        bearishRetestTouched =
+             high >= support *
+             (1 - retestBuffer / 100)
+
+        bearishRetestHeld =
+             close < support
+
+        bearishRetest =
+             trend == -1 and
+             bearishRetestTouched and
+             bearishRetestHeld
+
+        //────────────────────────────────────
+        // LONG ENTRY
+        //────────────────────────────────────
+
+        if bullishRetest
+
+            longEntry := true
+
+            if showRetest
+
+                label.new(
+                     bar_index,
+                     low,
+                     "RETEST ✓",
+                     style=label.style_label_up,
+                     color=retestColor,
+                     textcolor=color.white,
+                     size=size.tiny)
+
+            if showEntry
+
+                label.new(
+                     bar_index,
+                     low,
+                     "LONG ENTRY",
+                     style=label.style_label_up,
+                     color=color.green,
+                     textcolor=color.white,
+                     size=size.small)
+
+            // Setup finished.
+            // DO NOT allow another box.
+            setupState := 0
+
+        //────────────────────────────────────
+        // SHORT ENTRY
+        //────────────────────────────────────
+
+        else if bearishRetest
+
+            shortEntry := true
+
+            if showRetest
+
+                label.new(
+                     bar_index,
+                     high,
+                     "RETEST ✓",
+                     style=label.style_label_down,
+                     color=retestColor,
+                     textcolor=color.white,
+                     size=size.tiny)
+
+            if showEntry
+
+                label.new(
+                     bar_index,
+                     high,
+                     "SHORT ENTRY",
+                     style=label.style_label_down,
+                     color=color.red,
+                     textcolor=color.white,
+                     size=size.small)
+
+            // Setup finished.
+            // DO NOT allow another box.
+            setupState := 0
+
+        //────────────────────────────────────
+        // RETEST TIMEOUT
+        //────────────────────────────────────
+
+        if barsSinceAcceptance > retestBars
+
+            setupState := 0
+
+//────────────────────────────────────────────
+// UPDATE PREVIOUS TREND
+//────────────────────────────────────────────
+
+previousTrend := trend
+
+//────────────────────────────────────────────
+// ALERTS
+//────────────────────────────────────────────
+
+alertcondition(
+     longEntry,
+     title="LONG ENTRY",
+     message="Structure → Consolidation → Breakout → Acceptance → Retest → LONG ENTRY")
+
+alertcondition(
+     shortEntry,
+     title="SHORT ENTRY",
+     message="Structure → Consolidation → Breakdown → Acceptance → Retest → SHORT ENTRY")
+
+alertcondition(
+     acceptanceCount >= acceptBars and setupState == 3,
+     title="BREAKOUT ACCEPTED",
+     message="Breakout accepted. Waiting for retest.")

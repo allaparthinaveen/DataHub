@@ -1,0 +1,11 @@
+---
+# Enhance the Structure -> Consolidation -> Breakout -> Acceptance -> Retest Stragety
+## 1. Enhancement to remove noice
+## 2. Implement Live Signal notifications for BTC & Others
+## 3. Back testing - and capture the status
+## 4. Implement Trailing stop loss engine
+## 5. Trading Bot implementation
+---
+
+# Find out the FX Signal user with high winning probability & Implement those strategies
+ 
