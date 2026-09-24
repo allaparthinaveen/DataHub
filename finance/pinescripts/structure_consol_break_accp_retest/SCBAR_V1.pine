@@ -1,422 +1,415 @@
 //@version=6
-indicator("Structure → Consolidation → Breakout → Acceptance → Retest",
+indicator(
+     "Structure → Consolidation → Breakout → Acceptance → Retest",
      overlay=true,
      max_boxes_count=10,
      max_lines_count=100,
      max_labels_count=100)
 
-//────────────────────────────────────────────
+//====================================================================
 // INPUTS
-//────────────────────────────────────────────
+//====================================================================
 
-pivotLen       = input.int(3, "Swing Length", minval=1)
-minTrendSwings = input.int(2, "Minimum Trend Swings", minval=1)
+//────────────────────────────────────────────────────────────────────
+// STRUCTURE
+//────────────────────────────────────────────────────────────────────
 
-// Consolidation
-minConsBars    = input.int(5, "Minimum Consolidation Bars", minval=2)
-maxConsBars    = input.int(40, "Maximum Consolidation Bars", minval=5)
+groupStructure = "1. Structure"
 
-maxBoxPct      = input.float(3.0, "Maximum Consolidation Range %", minval=0.5, step=0.25)
+pivotLen       = input.int(3, "Pivot Length", minval=1, group=groupStructure)
+minTrendSwings = input.int(2, "Minimum Trend Swings", minval=1, group=groupStructure)
+showStructure  = input.bool(true, "Show HH/LH/HL/LL", group=groupStructure)
 
-atrLen         = input.int(14, "ATR Length", minval=1)
-atrLookback    = input.int(20, "ATR Compression Lookback", minval=5)
-maxAtrRatio    = input.float(0.85, "Maximum ATR Ratio", minval=0.1, maxval=1.5, step=0.05)
 
-swingLookback  = input.int(10, "Swing Containment Lookback", minval=3)
-maxExpansion   = input.float(1.20, "Maximum Range Expansion", minval=0.5, maxval=3.0, step=0.05)
+//────────────────────────────────────────────────────────────────────
+// CONSOLIDATION
+//────────────────────────────────────────────────────────────────────
 
-breakoutBuffer = input.float(0.10, "Breakout Buffer %", minval=0.0, step=0.05)
+groupConsolidation = "2. Consolidation"
 
-acceptBars     = input.int(1, "Acceptance Bars After Breakout", minval=1, maxval=3)
+minConsBars       = input.int(5, "Minimum Consolidation Bars", minval=3, group=groupConsolidation)
+maxConsBars       = input.int(40, "Maximum Consolidation Bars", minval=5, group=groupConsolidation)
 
-retestBars     = input.int(10, "Maximum Bars To Wait For Retest", minval=1)
-retestBuffer   = input.float(0.25, "Retest Zone Buffer %", minval=0.0, step=0.05)
+maxBoxPct         = input.float(
+     3.0,
+     "Maximum Box Range %",
+     minval=0.1,
+     step=0.1,
+     group=groupConsolidation)
 
-entryLineBars  = input.int(5, "Entry Line Length", minval=2, maxval=15)
+atrLen            = input.int(
+     14,
+     "ATR Length",
+     minval=1,
+     group=groupConsolidation)
 
-showStructure  = input.bool(true, "Show HH / HL / LH / LL")
-showBox        = input.bool(true, "Show Consolidation Box")
-showLevels     = input.bool(true, "Show Support / Resistance")
-showBreakout   = input.bool(true, "Show Breakout")
-showAcceptance = input.bool(true, "Show Acceptance")
-showRetest     = input.bool(true, "Show Retest")
-showEntry      = input.bool(true, "Show Entry")
+atrLookback       = input.int(
+     20,
+     "ATR Compression Lookback",
+     minval=5,
+     group=groupConsolidation)
 
-//────────────────────────────────────────────
-// COLORS
-//────────────────────────────────────────────
+maxAtrRatio       = input.float(
+     0.90,
+     "Maximum ATR Ratio",
+     minval=0.1,
+     step=0.05,
+     group=groupConsolidation)
 
-bullColor      = color.new(color.green, 0)
-bearColor      = color.new(color.red, 0)
+swingLookback     = input.int(
+     10,
+     "Swing Containment Lookback",
+     minval=3,
+     group=groupConsolidation)
 
-boxColor       = color.new(color.purple, 85)
-boxBorder      = color.new(color.purple, 0)
+maxExpansion      = input.float(
+     1.20,
+     "Maximum Swing Expansion",
+     minval=1.0,
+     step=0.05,
+     group=groupConsolidation)
 
-levelColor     = color.new(color.teal, 0)
 
-breakoutUp     = color.new(color.green, 0)
-breakoutDown   = color.new(color.red, 0)
+//────────────────────────────────────────────────────────────────────
+// BREAKOUT ENGINE
+//────────────────────────────────────────────────────────────────────
 
-acceptColor    = color.new(color.blue, 0)
-retestColor    = color.new(color.orange, 0)
+groupBreakout = "3. Breakout Score Engine"
 
-//────────────────────────────────────────────
-// SWING DETECTION
-//────────────────────────────────────────────
+breakoutBuffer = input.float(
+     0.10,
+     "Breakout Buffer %",
+     minval=0.0,
+     step=0.05,
+     group=groupBreakout)
+
+minBodyATR = input.float(
+     0.30,
+     "Minimum Body ATR",
+     minval=0.05,
+     step=0.05,
+     group=groupBreakout)
+
+minBodyRatio = input.float(
+     0.50,
+     "Minimum Body / Candle Ratio",
+     minval=0.1,
+     maxval=1.0,
+     step=0.05,
+     group=groupBreakout)
+
+minCloseLoc = input.float(
+     0.65,
+     "Minimum Close Location",
+     minval=0.5,
+     maxval=1.0,
+     step=0.05,
+     group=groupBreakout)
+
+useVolume = input.bool(
+     true,
+     "Use Volume Score",
+     group=groupBreakout)
+
+volumeLength = input.int(
+     20,
+     "Volume Average Length",
+     minval=5,
+     group=groupBreakout)
+
+volumeMult = input.float(
+     1.15,
+     "Minimum Relative Volume",
+     minval=0.5,
+     step=0.05,
+     group=groupBreakout)
+
+maxBreakoutATR = input.float(
+     2.50,
+     "Maximum Breakout Candle ATR",
+     minval=0.5,
+     step=0.25,
+     group=groupBreakout)
+
+minBreakoutScore = input.int(
+     4,
+     "Minimum Breakout Score / 5",
+     minval=1,
+     maxval=5,
+     group=groupBreakout)
+
+
+//────────────────────────────────────────────────────────────────────
+// ACCEPTANCE ENGINE
+//────────────────────────────────────────────────────────────────────
+
+groupAcceptance = "4. Acceptance Engine"
+
+// How many candles must be observed AFTER breakout.
+// This is NOT the acceptance condition by itself.
+// It simply prevents same-candle acceptance.
+acceptanceWatchBars = input.int(
+     1,
+     "Minimum Acceptance Watch Bars",
+     minval=1,
+     maxval=5,
+     group=groupAcceptance)
+
+// Acceptance quality score.
+// 3/5 is deliberately moderate to avoid over-filtering.
+minAcceptanceScore = input.int(
+     3,
+     "Minimum Acceptance Score / 5",
+     minval=2,
+     maxval=5,
+     group=groupAcceptance)
+
+// Maximum retracement back toward the broken level
+// before acceptance is considered weak.
+maxAcceptanceRetrace = input.float(
+     0.50,
+     "Maximum Acceptance Retracement %",
+     minval=0.05,
+     step=0.05,
+     group=groupAcceptance)
+
+// Strong opposite candle threshold.
+oppositeBodyATR = input.float(
+     0.50,
+     "Opposite Candle Failure Body ATR",
+     minval=0.1,
+     step=0.05,
+     group=groupAcceptance)
+
+// Wick rejection threshold.
+maxRejectionWick = input.float(
+     0.45,
+     "Maximum Rejection Wick Ratio",
+     minval=0.1,
+     maxval=0.9,
+     step=0.05,
+     group=groupAcceptance)
+
+// Follow-through minimum body.
+acceptanceBodyATR = input.float(
+     0.20,
+     "Follow-through Body ATR",
+     minval=0.05,
+     step=0.05,
+     group=groupAcceptance)
+
+// Volume deterioration tolerance.
+// Example: 0.60 means subsequent volume can fall to 60%
+// of breakout volume without automatically failing.
+minVolumeRetention = input.float(
+     0.60,
+     "Minimum Volume Retention",
+     minval=0.1,
+     maxval=1.0,
+     step=0.05,
+     group=groupAcceptance)
+
+
+//────────────────────────────────────────────────────────────────────
+// RETEST
+//────────────────────────────────────────────────────────────────────
+
+groupRetest = "5. Retest"
+
+retestBars = input.int(
+     10,
+     "Retest Window Bars",
+     minval=1,
+     group=groupRetest)
+
+retestBuffer = input.float(
+     0.25,
+     "Retest Buffer %",
+     minval=0.05,
+     step=0.05,
+     group=groupRetest)
+
+
+//────────────────────────────────────────────────────────────────────
+// DISPLAY
+//────────────────────────────────────────────────────────────────────
+
+groupDisplay = "6. Display"
+
+showBox        = input.bool(true, "Show Consolidation Box", group=groupDisplay)
+showLevels     = input.bool(true, "Show S/R Levels", group=groupDisplay)
+showBreakout   = input.bool(true, "Show Breakout", group=groupDisplay)
+showAcceptance = input.bool(true, "Show Acceptance", group=groupDisplay)
+showRetest     = input.bool(true, "Show Retest", group=groupDisplay)
+showEntry      = input.bool(true, "Show Entry", group=groupDisplay)
+
+
+//====================================================================
+// ATR
+//====================================================================
+
+atr = ta.atr(atrLen)
+
+
+//====================================================================
+// STRUCTURE ENGINE
+//====================================================================
 
 ph = ta.pivothigh(high, pivotLen, pivotLen)
 pl = ta.pivotlow(low, pivotLen, pivotLen)
 
-// Last TWO confirmed highs
 var float prevHigh = na
 var float lastHigh = na
 
-var int prevHighBar = na
-var int lastHighBar = na
-
-// Last TWO confirmed lows
 var float prevLow = na
 var float lastLow = na
-
-var int prevLowBar = na
-var int lastLowBar = na
-
-//────────────────────────────────────────────
-// STRUCTURE EVENTS
-//────────────────────────────────────────────
 
 bool newHH = false
 bool newLH = false
 bool newHL = false
 bool newLL = false
 
-//────────────────────────────────────────────
-// CONFIRMED HIGH
-//────────────────────────────────────────────
-
 if not na(ph)
 
     prevHigh := lastHigh
-    prevHighBar := lastHighBar
-
     lastHigh := ph
-    lastHighBar := bar_index - pivotLen
 
     if not na(prevHigh)
 
-        if lastHigh > prevHigh
+        if ph > prevHigh
             newHH := true
 
-        else if lastHigh < prevHigh
+        else if ph < prevHigh
             newLH := true
 
-//────────────────────────────────────────────
-// CONFIRMED LOW
-//────────────────────────────────────────────
 
 if not na(pl)
 
     prevLow := lastLow
-    prevLowBar := lastLowBar
-
     lastLow := pl
-    lastLowBar := bar_index - pivotLen
 
     if not na(prevLow)
 
-        if lastLow > prevLow
+        if pl > prevLow
             newHL := true
 
-        else if lastLow < prevLow
+        else if pl < prevLow
             newLL := true
 
-//────────────────────────────────────────────
-// STRUCTURE ENGINE
-//────────────────────────────────────────────
+
+//====================================================================
+// STRUCTURE LABELS
+//====================================================================
+
+if showStructure and newHH
+
+    label.new(
+         bar_index - pivotLen,
+         ph,
+         "HH",
+         style=label.style_label_down,
+         color=color.new(color.green, 0),
+         textcolor=color.white,
+         size=size.tiny)
+
+
+if showStructure and newLH
+
+    label.new(
+         bar_index - pivotLen,
+         ph,
+         "LH",
+         style=label.style_label_down,
+         color=color.new(color.red, 0),
+         textcolor=color.white,
+         size=size.tiny)
+
+
+if showStructure and newHL
+
+    label.new(
+         bar_index - pivotLen,
+         pl,
+         "HL",
+         style=label.style_label_up,
+         color=color.new(color.green, 0),
+         textcolor=color.white,
+         size=size.tiny)
+
+
+if showStructure and newLL
+
+    label.new(
+         bar_index - pivotLen,
+         pl,
+         "LL",
+         style=label.style_label_up,
+         color=color.new(color.red, 0),
+         textcolor=color.white,
+         size=size.tiny)
+
+
+//====================================================================
+// STRUCTURE REGIME
+//====================================================================
 
 var int trend = 0
 
-var int bullishStructureCount = 0
-var int bearishStructureCount = 0
-
-// Count recent structure events
-if newHH or newHL
-    bullishStructureCount += 1
-
-if newLH or newLL
-    bearishStructureCount += 1
-
-// Opposite structure invalidates previous accumulation
-if newLH or newLL
-    bullishStructureCount := 0
+var int bullishSwings = 0
+var int bearishSwings = 0
 
 if newHH or newHL
-    bearishStructureCount := 0
 
-// Current confirmed high relationship
-highStructureBull =
-     not na(prevHigh) and
-     not na(lastHigh) and
-     lastHigh > prevHigh
+    bullishSwings += 1
+    bearishSwings := 0
 
-highStructureBear =
-     not na(prevHigh) and
-     not na(lastHigh) and
-     lastHigh < prevHigh
+if newLH or newLL
 
-// Current confirmed low relationship
-lowStructureBull =
-     not na(prevLow) and
-     not na(lastLow) and
-     lastLow > prevLow
+    bearishSwings += 1
+    bullishSwings := 0
 
-lowStructureBear =
-     not na(prevLow) and
-     not na(lastLow) and
-     lastLow < prevLow
+if bullishSwings >= minTrendSwings
+    trend := 1
 
-// Require both HH + HL
-bullishStructureConfirmed =
-     highStructureBull and
-     lowStructureBull and
-     bullishStructureCount >= minTrendSwings
+if bearishSwings >= minTrendSwings
+    trend := -1
 
-// Require both LH + LL
-bearishStructureConfirmed =
-     highStructureBear and
-     lowStructureBear and
-     bearishStructureCount >= minTrendSwings
 
-int calculatedTrend = 0
+//====================================================================
+// CONSOLIDATION ENGINE
+//====================================================================
 
-if bullishStructureConfirmed
-    calculatedTrend := 1
-
-else if bearishStructureConfirmed
-    calculatedTrend := -1
-
-else
-    calculatedTrend := 0
-
-// Structure state follows current confirmed structure
-if calculatedTrend != trend
-    trend := calculatedTrend
-
-//────────────────────────────────────────────
-// STRUCTURE LABELS
-//────────────────────────────────────────────
-
-if showStructure
-
-    if newHH
-        label.new(
-             bar_index - pivotLen,
-             ph,
-             "HH",
-             style=label.style_label_down,
-             color=bullColor,
-             textcolor=color.white,
-             size=size.tiny)
-
-    if newLH
-        label.new(
-             bar_index - pivotLen,
-             ph,
-             "LH",
-             style=label.style_label_down,
-             color=bearColor,
-             textcolor=color.white,
-             size=size.tiny)
-
-    if newHL
-        label.new(
-             bar_index - pivotLen,
-             pl,
-             "HL",
-             style=label.style_label_up,
-             color=bullColor,
-             textcolor=color.white,
-             size=size.tiny)
-
-    if newLL
-        label.new(
-             bar_index - pivotLen,
-             pl,
-             "LL",
-             style=label.style_label_up,
-             color=bearColor,
-             textcolor=color.white,
-             size=size.tiny)
-
-//────────────────────────────────────────────
-// TREND CHANGE
-//────────────────────────────────────────────
-
-var int previousTrend = 0
-
-trendChanged =
-     trend != 0 and
-     trend != previousTrend
-
-newBullTrend =
-     trendChanged and
-     trend == 1
-
-newBearTrend =
-     trendChanged and
-     trend == -1
-
-//────────────────────────────────────────────
-// SETUP STATE
-//
-// 0 = waiting
-// 1 = consolidation
-// 2 = breakout / acceptance
-// 3 = accepted / waiting for retest
-//────────────────────────────────────────────
-
-var int setupState = 0
-
-var bool trendCycleUsed = false
-
-//────────────────────────────────────────────
-// BOX / S&R VARIABLES
-//────────────────────────────────────────────
-
-var int consStartBar = na
-
-var float resistance = na
-var float support = na
-
-var box consBox = na
-
-var line resistanceLine = na
-var line supportLine = na
-
-//────────────────────────────────────────────
-// ACCEPTANCE / RETEST VARIABLES
-//────────────────────────────────────────────
-
-var int acceptanceCount = 0
-var int breakoutBar = na
-var int retestStartBar = na
-
-//────────────────────────────────────────────
-// NEW TREND RESET
-//────────────────────────────────────────────
-
-if newBullTrend or newBearTrend
-
-    if trendCycleUsed
-
-        if not na(consBox)
-            box.delete(consBox)
-
-        if not na(resistanceLine)
-            line.delete(resistanceLine)
-
-        if not na(supportLine)
-            line.delete(supportLine)
-
-        consBox := na
-        resistanceLine := na
-        supportLine := na
-
-        resistance := na
-        support := na
-
-        consStartBar := na
-
-        acceptanceCount := 0
-        breakoutBar := na
-        retestStartBar := na
-
-        setupState := 0
-
-    trendCycleUsed := false
-
-//────────────────────────────────────────────
-// CONSOLIDATION ENGINE — IMPROVED
-//────────────────────────────────────────────
-
-// Current price range
 recentHigh = ta.highest(high, minConsBars)
 recentLow  = ta.lowest(low, minConsBars)
 
-recentMid = (recentHigh + recentLow) / 2.0
-
-rangePct =
-     recentMid != 0 ?
-     ((recentHigh - recentLow) / recentMid) * 100 :
-     999
-
-//────────────────────────────────────────────
-// 1. PRICE COMPRESSION
-//────────────────────────────────────────────
+consRange = recentHigh - recentLow
 
 priceCompression =
-     rangePct <= maxBoxPct
+     recentLow > 0 and
+     (consRange / recentLow * 100.0) <= maxBoxPct
 
-//────────────────────────────────────────────
-// 2. ATR COMPRESSION
-//────────────────────────────────────────────
-
-currentATR = ta.atr(atrLen)
-averageATR = ta.sma(currentATR, atrLookback)
-
-atrRatio =
-     averageATR != 0 ?
-     currentATR / averageATR :
-     999
+atrAverage = ta.sma(atr, atrLookback)
 
 atrCompression =
-     atrRatio <= maxAtrRatio
+     not na(atrAverage) and
+     atrAverage > 0 and
+     atr / atrAverage <= maxAtrRatio
 
-//────────────────────────────────────────────
-// 3. SWING CONTAINMENT
-//────────────────────────────────────────────
+swingHighRange = ta.highest(high, swingLookback)
+swingLowRange  = ta.lowest(low, swingLookback)
 
-swingHigh =
-     ta.highest(high, swingLookback)
-
-swingLow =
-     ta.lowest(low, swingLookback)
-
-swingMid =
-     (swingHigh + swingLow) / 2.0
-
-swingRangePct =
-     swingMid != 0 ?
-     ((swingHigh - swingLow) / swingMid) * 100 :
-     999
+swingRange = swingHighRange - swingLowRange
 
 swingContained =
-     swingRangePct <= maxBoxPct * maxExpansion
+     consRange > 0 and
+     swingRange <= consRange * maxExpansion
 
-//────────────────────────────────────────────
-// 4. BAR RANGE COMPRESSION
-//────────────────────────────────────────────
-
-avgBarRange =
-     ta.sma(high - low, atrLookback)
-
-currentBarRange =
-     high - low
+rangeAverage = ta.sma(high - low, atrLookback)
 
 rangeCompression =
-     avgBarRange != 0 ?
-     currentBarRange / avgBarRange <= maxExpansion :
-     false
-
-//────────────────────────────────────────────
-// CONSOLIDATION QUALITY
-//
-// Need price compression AND
-// at least one volatility/structure confirmation.
-//
-// This prevents a simple large flat range
-// from automatically becoming a box.
-//────────────────────────────────────────────
+     not na(rangeAverage) and
+     rangeAverage > 0 and
+     (high - low) <= rangeAverage * 1.20
 
 compressionScore =
      (priceCompression ? 1 : 0) +
@@ -428,72 +421,101 @@ isQualityConsolidation =
      priceCompression and
      compressionScore >= 3
 
-//────────────────────────────────────────────
+
+//====================================================================
+// STATE MACHINE
+//
+// 0 = Waiting
+// 1 = Consolidation
+// 2 = Acceptance Watch
+// 3 = Retest Watch
+//====================================================================
+
+var int setupState = 0
+
+var int boxStartBar = na
+var int boxAge = 0
+
+var float resistance = na
+var float support = na
+
+var int breakoutDirection = 0
+var int breakoutBar = na
+
+var float breakoutPrice = na
+var float breakoutVolume = na
+var float breakoutATR = na
+
+var int acceptanceBarsSeen = 0
+
+var box consBox = na
+
+var line resistanceLine = na
+var line supportLine = na
+
+var line entryLine = na
+
+
+//====================================================================
 // START CONSOLIDATION
-//────────────────────────────────────────────
+//====================================================================
 
-canStartConsolidation =
-     trend != 0 and
-     setupState == 0 and
-     not trendCycleUsed and
-     isQualityConsolidation
-
-if canStartConsolidation
+if setupState == 0 and isQualityConsolidation
 
     setupState := 1
-    trendCycleUsed := true
 
-    consStartBar :=
-         bar_index - minConsBars + 1
+    boxStartBar := bar_index
+    boxAge := 0
 
     resistance := recentHigh
     support := recentLow
 
-    //────────────────────────────────────────
-    // CONSOLIDATION BOX
-    //────────────────────────────────────────
+    breakoutDirection := 0
+    breakoutBar := na
+
+    breakoutPrice := na
+    breakoutVolume := na
+    breakoutATR := na
+
+    acceptanceBarsSeen := 0
 
     if showBox
 
         consBox := box.new(
-             left=consStartBar,
+             left=bar_index,
              top=resistance,
              right=bar_index,
              bottom=support,
-             border_color=boxBorder,
-             bgcolor=boxColor,
-             border_width=2)
+             bgcolor=color.new(color.purple, 88),
+             border_color=color.new(color.purple, 25))
 
-    //────────────────────────────────────────
-    // SUPPORT / RESISTANCE
-    //────────────────────────────────────────
 
     if showLevels
 
         resistanceLine := line.new(
-             consStartBar,
+             bar_index,
              resistance,
              bar_index,
              resistance,
-             color=levelColor,
-             width=2)
+             color=color.new(color.red, 20),
+             width=1)
 
         supportLine := line.new(
-             consStartBar,
+             bar_index,
              support,
              bar_index,
              support,
-             color=levelColor,
-             width=2)
+             color=color.new(color.green, 20),
+             width=1)
 
-//────────────────────────────────────────────
+
+//====================================================================
 // ACTIVE CONSOLIDATION
-//────────────────────────────────────────────
+//====================================================================
 
 if setupState == 1
 
-    consBars =
-         bar_index - consStartBar + 1
+    boxAge += 1
 
     if showBox and not na(consBox)
 
@@ -515,202 +537,576 @@ if setupState == 1
                  supportLine,
                  bar_index)
 
-    //────────────────────────────────────────
-    // BREAKOUT
-    //────────────────────────────────────────
 
-    bullishBreakout =
-         close >
-         resistance *
-         (1 + breakoutBuffer / 100)
+//====================================================================
+// CONSOLIDATION TIMEOUT
+//====================================================================
 
-    bearishBreakout =
-         close <
-         support *
-         (1 - breakoutBuffer / 100)
+if setupState == 1 and boxAge > maxConsBars
 
-    // BULLISH BREAKOUT
+    setupState := 0
 
-    if trend == 1 and bullishBreakout
+    if not na(consBox)
 
-        setupState := 2
-        breakoutBar := bar_index
-        acceptanceCount := 0
-
-        if showBreakout
-
-            label.new(
-                 bar_index,
-                 low - ta.atr(14) * 0.35,
-                 "BREAKOUT ↑",
-                 style=label.style_label_up,
-                 color=breakoutUp,
-                 textcolor=color.white,
-                 size=size.tiny)
-
-    // BEARISH BREAKOUT
-
-    else if trend == -1 and bearishBreakout
-
-        setupState := 2
-        breakoutBar := bar_index
-        acceptanceCount := 0
-
-        if showBreakout
-
-            label.new(
-                 bar_index,
-                 high + ta.atr(14) * 0.35,
-                 "BREAKDOWN ↓",
-                 style=label.style_label_down,
-                 color=breakoutDown,
-                 textcolor=color.white,
-                 size=size.tiny)
-
-    //────────────────────────────────────────
-    // CONSOLIDATION TIMEOUT
-    //────────────────────────────────────────
-
-    if consBars > maxConsBars
-
-        if not na(consBox)
-            box.delete(consBox)
-
-        if not na(resistanceLine)
-            line.delete(resistanceLine)
-
-        if not na(supportLine)
-            line.delete(supportLine)
-
+        box.delete(consBox)
         consBox := na
+
+    if not na(resistanceLine)
+
+        line.delete(resistanceLine)
         resistanceLine := na
+
+    if not na(supportLine)
+
+        line.delete(supportLine)
         supportLine := na
 
-        setupState := 0
-        trendCycleUsed := false
 
-//────────────────────────────────────────────
-// ACCEPTANCE
-//────────────────────────────────────────────
+//====================================================================
+// BREAKOUT QUALITY CALCULATIONS
+//====================================================================
 
-if setupState == 2
+candleRange = high - low
 
-    isPostBreakoutBar =
-         bar_index > breakoutBar
+body = math.abs(close - open)
 
-    if isPostBreakoutBar
+bodyRatio =
+     candleRange > 0
+     ? body / candleRange
+     : 0
 
-        //────────────────────────────────────
-        // BULLISH ACCEPTANCE
-        //────────────────────────────────────
+bodyATR =
+     atr > 0
+     ? body / atr
+     : 0
 
-        if trend == 1
+bullCloseLocation =
+     candleRange > 0
+     ? (close - low) / candleRange
+     : 0
 
-            if close > resistance
+bearCloseLocation =
+     candleRange > 0
+     ? (high - close) / candleRange
+     : 0
 
-                acceptanceCount += 1
 
-                if acceptanceCount >= acceptBars
+averageVolume = ta.sma(volume, volumeLength)[1]
 
-                    setupState := 3
-                    retestStartBar := bar_index
+relativeVolume =
+     not na(averageVolume) and averageVolume > 0
+     ? volume / averageVolume
+     : 0
 
-                    if showAcceptance
 
-                        label.new(
-                             bar_index,
-                             low - ta.atr(14) * 0.70,
-                             "ACCEPTED ✓",
-                             style=label.style_label_up,
-                             color=acceptColor,
-                             textcolor=color.white,
-                             size=size.tiny)
+volumeQuality =
+     not useVolume or relativeVolume >= volumeMult
 
-            else
 
-                if close <= resistance
+bullBodyQuality =
+     close > open and
+     bodyRatio >= minBodyRatio
 
-                    if showBreakout
 
-                        label.new(
-                             bar_index,
-                             high + ta.atr(14) * 0.35,
-                             "FAILED",
-                             style=label.style_label_down,
-                             color=color.gray,
-                             textcolor=color.white,
-                             size=size.tiny)
+bearBodyQuality =
+     close < open and
+     bodyRatio >= minBodyRatio
 
-                    setupState := 0
-                    acceptanceCount := 0
 
-        //────────────────────────────────────
-        // BEARISH ACCEPTANCE
-        //────────────────────────────────────
+bullCloseQuality =
+     bullCloseLocation >= minCloseLoc
 
-        else if trend == -1
 
-            if close < support
+bearCloseQuality =
+     bearCloseLocation >= minCloseLoc
 
-                acceptanceCount += 1
 
-                if acceptanceCount >= acceptBars
+displacementQuality =
+     bodyATR >= minBodyATR
 
-                    setupState := 3
-                    retestStartBar := bar_index
 
-                    if showAcceptance
+bullStructureQuality =
+     trend == 1
 
-                        label.new(
-                             bar_index,
-                             high + ta.atr(14) * 0.70,
-                             "ACCEPTED ✓",
-                             style=label.style_label_down,
-                             color=acceptColor,
-                             textcolor=color.white,
-                             size=size.tiny)
 
-            else
+bearStructureQuality =
+     trend == -1
 
-                if close >= support
 
-                    if showBreakout
+notExhausted =
+     bodyATR <= maxBreakoutATR
 
-                        label.new(
-                             bar_index,
-                             low - ta.atr(14) * 0.35,
-                             "FAILED",
-                             style=label.style_label_up,
-                             color=color.gray,
-                             textcolor=color.white,
-                             size=size.tiny)
 
-                    setupState := 0
-                    acceptanceCount := 0
+bullScore =
+     (bullBodyQuality ? 1 : 0) +
+     (bullCloseQuality ? 1 : 0) +
+     (displacementQuality ? 1 : 0) +
+     (volumeQuality ? 1 : 0) +
+     (bullStructureQuality ? 1 : 0)
 
-//────────────────────────────────────────────
-// RETEST + ENTRY
-//────────────────────────────────────────────
 
-var bool longEntry = false
-var bool shortEntry = false
+bearScore =
+     (bearBodyQuality ? 1 : 0) +
+     (bearCloseQuality ? 1 : 0) +
+     (displacementQuality ? 1 : 0) +
+     (volumeQuality ? 1 : 0) +
+     (bearStructureQuality ? 1 : 0)
 
-longEntry := false
-shortEntry := false
+
+//====================================================================
+// LEVEL BREAK
+//====================================================================
+
+bullLevelBreak =
+     setupState == 1 and
+     close > resistance *
+     (1 + breakoutBuffer / 100)
+
+bearLevelBreak =
+     setupState == 1 and
+     close < support *
+     (1 - breakoutBuffer / 100)
+
+
+//====================================================================
+// FINAL BREAKOUT
+//====================================================================
+
+bullBreakout =
+     bullLevelBreak and
+     bullScore >= minBreakoutScore and
+     notExhausted
+
+bearBreakout =
+     bearLevelBreak and
+     bearScore >= minBreakoutScore and
+     notExhausted
+
+
+//====================================================================
+// BREAKOUT → ACCEPTANCE WATCH
+//
+// IMPORTANT:
+// The breakout candle NEVER becomes accepted here.
+// We only enter Acceptance Watch.
+//====================================================================
+
+if bullBreakout
+
+    setupState := 2
+
+    breakoutDirection := 1
+    breakoutBar := bar_index
+
+    breakoutPrice := close
+    breakoutVolume := volume
+    breakoutATR := atr
+
+    acceptanceBarsSeen := 0
+
+    if showBreakout
+
+        label.new(
+             bar_index,
+             low,
+             "BREAKOUT\nLONG " +
+             str.tostring(bullScore) +
+             "/5",
+             style=label.style_label_up,
+             color=color.new(color.green, 0),
+             textcolor=color.white,
+             size=size.small)
+
+
+if bearBreakout
+
+    setupState := 2
+
+    breakoutDirection := -1
+    breakoutBar := bar_index
+
+    breakoutPrice := close
+    breakoutVolume := volume
+    breakoutATR := atr
+
+    acceptanceBarsSeen := 0
+
+    if showBreakout
+
+        label.new(
+             bar_index,
+             high,
+             "BREAKOUT\nSHORT " +
+             str.tostring(bearScore) +
+             "/5",
+             style=label.style_label_down,
+             color=color.new(color.red, 0),
+             textcolor=color.white,
+             size=size.small)
+
+
+//====================================================================
+// ACCEPTANCE ENGINE
+//====================================================================
+
+bool acceptanceConfirmed = false
+bool acceptanceFailed = false
+
+if setupState == 2 and bar_index > breakoutBar
+
+    acceptanceBarsSeen += 1
+
+    //────────────────────────────────────────
+    // COMMON CANDLE METRICS
+    //────────────────────────────────────────
+
+    currentBody = math.abs(close - open)
+
+    currentBodyATR =
+         atr > 0
+         ? currentBody / atr
+         : 0
+
+    currentRange = high - low
+
+    upperWick =
+         high - math.max(open, close)
+
+    lowerWick =
+         math.min(open, close) - low
+
+    upperWickRatio =
+         currentRange > 0
+         ? upperWick / currentRange
+         : 0
+
+    lowerWickRatio =
+         currentRange > 0
+         ? lowerWick / currentRange
+         : 0
+
+
+    //────────────────────────────────────────
+    // BULLISH ACCEPTANCE
+    //────────────────────────────────────────
+
+    if breakoutDirection == 1
+
+        //------------------------------------------------------------
+        // 1. HOLD LEVEL
+        //------------------------------------------------------------
+
+        holdLevel =
+             close > resistance
+
+        //------------------------------------------------------------
+        // 2. CLOSE QUALITY
+        //------------------------------------------------------------
+
+        bullCloseQualityNow =
+             close > resistance and
+             close > open
+
+        //------------------------------------------------------------
+        // 3. FOLLOW-THROUGH
+        //------------------------------------------------------------
+
+        followThrough =
+             close > resistance and
+             currentBodyATR >= acceptanceBodyATR
+
+        //------------------------------------------------------------
+        // 4. MOMENTUM
+        //------------------------------------------------------------
+
+        momentumHealthy =
+             close >= breakoutPrice or
+             currentBodyATR >= acceptanceBodyATR
+
+        //------------------------------------------------------------
+        // 5. VOLUME BEHAVIOR
+        //------------------------------------------------------------
+
+        volumeBehavior =
+             not useVolume or
+             volume >= breakoutVolume * minVolumeRetention
+
+        //------------------------------------------------------------
+        // 6. REJECTION QUALITY
+        //
+        // Large upper wick after bullish breakout is a warning.
+        //------------------------------------------------------------
+
+        rejectionHealthy =
+             upperWickRatio <= maxRejectionWick
+
+        //------------------------------------------------------------
+        // 7. RETRACEMENT
+        //
+        // Don't allow price to travel decisively back through
+        // the broken level.
+        //------------------------------------------------------------
+
+        retracementLimit =
+             resistance *
+             (1 - maxAcceptanceRetrace / 100)
+
+        retracementHealthy =
+             low >= retracementLimit or
+             close > resistance
+
+        //------------------------------------------------------------
+        // FAILURE DETECTION
+        //------------------------------------------------------------
+
+        closedInsideBox =
+             close <= resistance
+
+        strongOppositeCandle =
+             close < open and
+             currentBodyATR >= oppositeBodyATR
+
+        failedLevelFlip =
+             close < resistance
+
+        excessiveRetracement =
+             low < retracementLimit and
+             close < resistance
+
+        acceptanceFailed :=
+             closedInsideBox or
+             strongOppositeCandle or
+             excessiveRetracement
+
+        //------------------------------------------------------------
+        // ACCEPTANCE SCORE
+        //
+        // Hold is mandatory.
+        // Other evidence contributes to quality.
+        //------------------------------------------------------------
+
+        bullAcceptanceScore =
+             (holdLevel ? 1 : 0) +
+             (bullCloseQualityNow ? 1 : 0) +
+             (followThrough ? 1 : 0) +
+             (momentumHealthy ? 1 : 0) +
+             (volumeBehavior and rejectionHealthy ? 1 : 0)
+
+        //------------------------------------------------------------
+        // ACCEPT
+        //------------------------------------------------------------
+
+        acceptanceConfirmed :=
+             not acceptanceFailed and
+             holdLevel and
+             acceptanceBarsSeen >= acceptanceWatchBars and
+             bullAcceptanceScore >= minAcceptanceScore
+
+
+        //------------------------------------------------------------
+        // BULLISH FAILURE
+        //------------------------------------------------------------
+
+        if acceptanceFailed
+
+            if showAcceptance
+
+                label.new(
+                     bar_index,
+                     high,
+                     "ACCEPTANCE FAILED",
+                     style=label.style_label_down,
+                     color=color.gray,
+                     textcolor=color.white,
+                     size=size.tiny)
+
+            setupState := 0
+            breakoutDirection := 0
+            acceptanceBarsSeen := 0
+
+
+    //────────────────────────────────────────
+    // BEARISH ACCEPTANCE
+    //────────────────────────────────────────
+
+    if breakoutDirection == -1
+
+        //------------------------------------------------------------
+        // 1. HOLD LEVEL
+        //------------------------------------------------------------
+
+        holdLevel =
+             close < support
+
+        //------------------------------------------------------------
+        // 2. CLOSE QUALITY
+        //------------------------------------------------------------
+
+        bearCloseQualityNow =
+             close < support and
+             close < open
+
+        //------------------------------------------------------------
+        // 3. FOLLOW-THROUGH
+        //------------------------------------------------------------
+
+        followThrough =
+             close < support and
+             currentBodyATR >= acceptanceBodyATR
+
+        //------------------------------------------------------------
+        // 4. MOMENTUM
+        //------------------------------------------------------------
+
+        momentumHealthy =
+             close <= breakoutPrice or
+             currentBodyATR >= acceptanceBodyATR
+
+        //------------------------------------------------------------
+        // 5. VOLUME BEHAVIOR
+        //------------------------------------------------------------
+
+        volumeBehavior =
+             not useVolume or
+             volume >= breakoutVolume * minVolumeRetention
+
+        //------------------------------------------------------------
+        // 6. REJECTION QUALITY
+        //------------------------------------------------------------
+
+        rejectionHealthy =
+             lowerWickRatio <= maxRejectionWick
+
+        //------------------------------------------------------------
+        // 7. RETRACEMENT
+        //------------------------------------------------------------
+
+        retracementLimit =
+             support *
+             (1 + maxAcceptanceRetrace / 100)
+
+        retracementHealthy =
+             high <= retracementLimit or
+             close < support
+
+        //------------------------------------------------------------
+        // FAILURE DETECTION
+        //------------------------------------------------------------
+
+        closedInsideBox =
+             close >= support
+
+        strongOppositeCandle =
+             close > open and
+             currentBodyATR >= oppositeBodyATR
+
+        failedLevelFlip =
+             close > support
+
+        excessiveRetracement =
+             high > retracementLimit and
+             close > support
+
+        acceptanceFailed :=
+             closedInsideBox or
+             strongOppositeCandle or
+             excessiveRetracement
+
+        //------------------------------------------------------------
+        // ACCEPTANCE SCORE
+        //------------------------------------------------------------
+
+        bearAcceptanceScore =
+             (holdLevel ? 1 : 0) +
+             (bearCloseQualityNow ? 1 : 0) +
+             (followThrough ? 1 : 0) +
+             (momentumHealthy ? 1 : 0) +
+             (volumeBehavior and rejectionHealthy ? 1 : 0)
+
+        //------------------------------------------------------------
+        // ACCEPT
+        //------------------------------------------------------------
+
+        acceptanceConfirmed :=
+             not acceptanceFailed and
+             holdLevel and
+             acceptanceBarsSeen >= acceptanceWatchBars and
+             bearAcceptanceScore >= minAcceptanceScore
+
+
+        //------------------------------------------------------------
+        // BEARISH FAILURE
+        //------------------------------------------------------------
+
+        if acceptanceFailed
+
+            if showAcceptance
+
+                label.new(
+                     bar_index,
+                     low,
+                     "ACCEPTANCE FAILED",
+                     style=label.style_label_up,
+                     color=color.gray,
+                     textcolor=color.white,
+                     size=size.tiny)
+
+            setupState := 0
+            breakoutDirection := 0
+            acceptanceBarsSeen := 0
+
+
+//====================================================================
+// ACCEPTED → RETEST WATCH
+//====================================================================
+
+if acceptanceConfirmed
+
+    setupState := 3
+
+    if showAcceptance
+
+        if breakoutDirection == 1
+
+            label.new(
+                 bar_index,
+                 low,
+                 "ACCEPTED ✓",
+                 style=label.style_label_up,
+                 color=color.new(color.blue, 0),
+                 textcolor=color.white,
+                 size=size.small)
+
+        else if breakoutDirection == -1
+
+            label.new(
+                 bar_index,
+                 high,
+                 "ACCEPTED ✓",
+                 style=label.style_label_down,
+                 color=color.new(color.blue, 0),
+                 textcolor=color.white,
+                 size=size.small)
+
+
+//====================================================================
+// RETEST ENGINE
+//
+// Intentionally kept simple for now.
+// We will upgrade this AFTER acceptance is validated.
+//====================================================================
+
+var int retestCount = 0
 
 if setupState == 3
 
-    isAfterAcceptance =
-         bar_index > retestStartBar
+    retestCount += 1
 
-    if isAfterAcceptance
+    //────────────────────────────────────────
+    // LONG RETEST
+    //────────────────────────────────────────
 
-        barsSinceAcceptance =
-             bar_index - retestStartBar
-
-        //────────────────────────────────────
-        // RETEST CONDITIONS
-        //────────────────────────────────────
+    if breakoutDirection == 1
 
         bullishRetestTouched =
              low <= resistance *
@@ -720,9 +1116,51 @@ if setupState == 3
              close > resistance
 
         bullishRetest =
-             trend == 1 and
              bullishRetestTouched and
              bullishRetestHeld
+
+        if bullishRetest
+
+            if showRetest
+
+                label.new(
+                     bar_index,
+                     low,
+                     "RETEST",
+                     style=label.style_label_up,
+                     color=color.new(color.orange, 0),
+                     textcolor=color.white,
+                     size=size.tiny)
+
+            if showEntry
+
+                label.new(
+                     bar_index,
+                     close,
+                     "LONG ENTRY",
+                     style=label.style_label_up,
+                     color=color.new(color.green, 0),
+                     textcolor=color.white,
+                     size=size.small)
+
+                entryLine := line.new(
+                     bar_index,
+                     close,
+                     bar_index + 5,
+                     close,
+                     color=color.new(color.green, 0),
+                     width=2)
+
+            setupState := 0
+            breakoutDirection := 0
+            retestCount := 0
+
+
+    //────────────────────────────────────────
+    // SHORT RETEST
+    //────────────────────────────────────────
+
+    else if breakoutDirection == -1
 
         bearishRetestTouched =
              high >= support *
@@ -732,135 +1170,77 @@ if setupState == 3
              close < support
 
         bearishRetest =
-             trend == -1 and
              bearishRetestTouched and
              bearishRetestHeld
 
-        //────────────────────────────────────
-        // LONG RETEST → ENTRY
-        //────────────────────────────────────
-
-        if bullishRetest
-
-            longEntry := true
-
-            entryPrice = close
+        if bearishRetest
 
             if showRetest
 
                 label.new(
                      bar_index,
-                     low - ta.atr(14) * 0.30,
-                     "RETEST",
-                     style=label.style_label_up,
-                     color=retestColor,
-                     textcolor=color.white,
-                     size=size.tiny)
-
-            if showEntry
-
-                entryEndBar =
-                     bar_index + entryLineBars
-
-                line.new(
-                     bar_index,
-                     entryPrice,
-                     entryEndBar,
-                     entryPrice,
-                     color=color.green,
-                     width=2)
-
-                label.new(
-                     entryEndBar,
-                     entryPrice,
-                     "ENTRY " +
-                     str.tostring(
-                         entryPrice,
-                         format.mintick),
-                     style=label.style_label_left,
-                     color=color.rgb(25, 120, 28),
-                     textcolor=color.white,
-                     size=size.small)
-
-            setupState := 0
-
-        //────────────────────────────────────
-        // SHORT RETEST → ENTRY
-        //────────────────────────────────────
-
-        else if bearishRetest
-
-            shortEntry := true
-
-            entryPrice = close
-
-            if showRetest
-
-                label.new(
-                     bar_index,
-                     high + ta.atr(14) * 0.30,
+                     high,
                      "RETEST",
                      style=label.style_label_down,
-                     color=retestColor,
+                     color=color.new(color.orange, 0),
                      textcolor=color.white,
                      size=size.tiny)
 
             if showEntry
 
-                entryEndBar =
-                     bar_index + entryLineBars
-
-                line.new(
-                     bar_index,
-                     entryPrice,
-                     entryEndBar,
-                     entryPrice,
-                     color=color.red,
-                     width=2)
-
                 label.new(
-                     entryEndBar,
-                     entryPrice,
-                     "ENTRY " +
-                     str.tostring(
-                         entryPrice,
-                         format.mintick),
-                     style=label.style_label_left,
-                     color=color.red,
+                     bar_index,
+                     close,
+                     "SHORT ENTRY",
+                     style=label.style_label_down,
+                     color=color.new(color.red, 0),
                      textcolor=color.white,
                      size=size.small)
 
+                entryLine := line.new(
+                     bar_index,
+                     close,
+                     bar_index + 5,
+                     close,
+                     color=color.new(color.red, 0),
+                     width=2)
+
             setupState := 0
+            breakoutDirection := 0
+            retestCount := 0
 
-        //────────────────────────────────────
-        // RETEST TIMEOUT
-        //────────────────────────────────────
 
-        if barsSinceAcceptance > retestBars
+//====================================================================
+// RETEST TIMEOUT
+//====================================================================
 
-            setupState := 0
+if setupState == 3 and retestCount > retestBars
 
-//────────────────────────────────────────────
-// UPDATE PREVIOUS TREND
-//────────────────────────────────────────────
+    setupState := 0
+    breakoutDirection := 0
+    retestCount := 0
 
-previousTrend := trend
 
-//────────────────────────────────────────────
+//====================================================================
 // ALERTS
-//────────────────────────────────────────────
+//====================================================================
 
 alertcondition(
-     longEntry,
-     title="LONG ENTRY",
-     message="Structure → Consolidation → Breakout → Acceptance → Retest → LONG ENTRY")
+     bullBreakout,
+     title="Bullish Breakout",
+     message="Bullish breakout detected — Acceptance Watch started.")
 
 alertcondition(
-     shortEntry,
-     title="SHORT ENTRY",
-     message="Structure → Consolidation → Breakdown → Acceptance → Retest → SHORT ENTRY")
+     bearBreakout,
+     title="Bearish Breakout",
+     message="Bearish breakout detected — Acceptance Watch started.")
 
 alertcondition(
-     acceptanceCount >= acceptBars and setupState == 3,
-     title="BREAKOUT ACCEPTED",
-     message="Breakout accepted. Waiting for retest.")
+     acceptanceConfirmed and breakoutDirection == 1,
+     title="Bullish Breakout Accepted",
+     message="Bullish breakout accepted — waiting for retest.")
+
+alertcondition(
+     acceptanceConfirmed and breakoutDirection == -1,
+     title="Bearish Breakout Accepted",
+     message="Bearish breakout accepted — waiting for retest.")
