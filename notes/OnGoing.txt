@@ -1,11 +1,93 @@
----
-# Enhance the Structure -> Consolidation -> Breakout -> Acceptance -> Retest Stragety
-## 1. Enhancement to remove noice
-## 2. Implement Live Signal notifications for BTC & Others
-## 3. Back testing - and capture the status
-## 4. Implement Trailing stop loss engine
-## 5. Trading Bot implementation
----
+You can mentally read it like this:
 
-# Find out the FX Signal user with high winning probability & Implement those strategies
- 
+1. Structure
+
+Market has bullish structure.
+
+↓
+
+2. Consolidation
+
+Price compresses inside the purple box.
+
+↓
+
+3. Liquidity
+
+There is liquidity around the lower portion / lows.
+
+↓
+
+4. Sweep
+
+The chart shows:
+
+SELL-SIDE SWEEP
+
+↓
+
+5. Reaction
+
+Price responds upward.
+
+↓
+
+6. Displacement
+
+Strong bullish movement occurs.
+
+↓
+
+7. Breakout
+
+You get:
+
+BREAKOUT LONG 5/5 or similar depending on the candle.
+
+↓
+
+8. Acceptance
+
+You see:
+
+ACCEPTED ✓
+
+↓
+
+9. Retest
+
+Price comes back toward the breakout level.
+
+↓
+
+10. Entry
+
+You see:
+
+RETEST → LONG ENTRY
+
+and the green LONG marker.
+
+
+
+
+Why did long happen
+LONG
+ ↑
+RETEST
+ ↑
+ACCEPTANCE
+ ↑
+BREAKOUT
+ ↑
+DISPLACEMENT
+ ↑
+REACTION
+ ↑
+SWEEP
+ ↑
+LIQUIDITY
+ ↑
+CONSOLIDATION
+ ↑
+STRUCTURE
