@@ -1,0 +1,129 @@
+Intelligent Failure-Only Logging Starter
+
+Role & Mission
+
+You are a Principal Java/Spring Boot Architect specializing in observability, aspect-oriented programming (AOP), and logging framework internals (Logback/SLF4J).
+
+Your objective is to enhance an existing custom Spring Boot common logging starter (common-logging-starter.jar) with an intelligent, non-intrusive log filtering and buffering mechanism. The goal is to eliminate log noise caused by positive/success paths and developer-written intermediate logs while preserving deep diagnostic telemetry whenever a failure occurs.
+
+1. Problem Statement
+
+Consumer microservices have hundreds of classes with noisy manual logs (log.info(), log.debug()) checking parameters, printing intermediary validation passes, and logging success states.
+
+Modifying business code across every microservice is not an option.
+
+Adding explicit annotations across thousands of methods is impractical.
+
+We need a solution integrated into our shared logging starter that:
+
+Captures method execution context dynamically without code modifications.
+
+Suppresses internal positive/success logs emitted during method execution.
+
+Flushes detailed context and logs only when a method fails (due to exceptions, negative return values like false, or failure response envelopes).
+
+2. Technical Architecture & Requirements
+
+2.1 Dynamic Package-Driven Pointcut
+
+Drive interception through application.yml / application.properties rather than manual annotations.
+
+Provide a Spring PointcutAdvisor using AspectJExpressionPointcut or custom Pointcut matching configured target packages.
+
+Ensure proper bean ordering (Ordered.HIGHEST_PRECEDENCE or configurable) so tracing context is established before business logic runs.
+
+2.2 Configuration Properties Model
+
+Expose clean, type-safe properties under management.logging.intelligent:
+
+management:
+  logging:
+    intelligent:
+      enabled: true
+      base-packages:
+        - com.example.service
+        - com.example.validation
+      exclude-packages:
+        - com.example.config
+      failure-conditions:
+        boolean-failure: true          # Treat return value `false` as failure
+        null-failure: false             # Treat return value `null` as failure
+        response-wrapper-check: true    # Inspect objects for isSuccess(), getCode(), etc.
+      log-buffer:
+        max-buffer-size: 100            # Prevent memory leaks in long-running flows
+        capture-internal-logs: true     # Use Logback TurboFilter/Appender buffering
+
+
+2.3 Logback Intermediate Log Buffering (TurboFilter / ThreadLocal Buffer)
+
+Crucial requirement for eliminating internal method-level log noise:
+
+Implement a ThreadLocal Execution Context Buffer that records log events emitted inside targeted methods.
+
+Integrate a custom Logback TurboFilter or Delegating Appender:
+
+If a thread is currently in an active "intelligent logging" scope, divert INFO/DEBUG log events into the thread's memory ring buffer instead of writing them directly to standard output/file appenders.
+
+If an error/warn occurs or the method exits as a failure:
+
+Flush the buffered intermediate logs immediately to target appenders.
+
+Log method inputs, execution duration, and failure reason.
+
+If the method succeeds:
+
+Discard/purge the buffered logs.
+
+Always purge the buffer inside a finally block to prevent ThreadLocal memory leaks in thread-pooled environments.
+
+2.4 Failure Evaluation Engine
+
+Evaluate method completion through:
+
+Uncaught Exceptions (Throwable):
+
+Immediate failure trigger.
+
+Flush execution logs + dump input arguments + log stack trace at ERROR level.
+
+Boolean Returns:
+
+Methods returning primitive boolean or Boolean.FALSE when boolean-failure: true.
+
+Response Wrappers / Domain Envelopes:
+
+Inspect response objects for common status indicators via lightweight reflection or pre-registered accessors (e.g., isSuccess() == false, getStatusCode() >= 400, Result.FAILED).
+
+3. Implementation Deliverables Expected
+
+Generate production-ready Java code for the following components:
+
+IntelligentLoggingProperties.java:
+
+Standard @ConfigurationProperties binding matching the YAML structure above.
+
+LogBufferContext.java:
+
+Thread-safe, bounded memory buffer using ThreadLocal with explicit start(), append(), flush(), and clear() lifecycle methods.
+
+IntelligentLoggingTurboFilter.java (Logback Integration):
+
+TurboFilter that checks whether the current thread is in an active buffering scope, intercepting logs before they hit formatting pipelines.
+
+IntelligentLoggingAdvice.java (AOP Around Advice):
+
+Around advice that starts the buffer scope, intercepts method execution, detects failures (return value / exception), flushes on failure, and cleans up in a finally block.
+
+IntelligentLoggingAutoConfiguration.java:
+
+Auto-configuration class wiring the advisor, properties, and filter conditionally using @ConditionalOnProperty.
+
+Integration Example & Unit Test:
+
+A sample service class demonstrating validation logic (true/false/exception).
+
+A Spring Boot test verifying:
+
+Positive run $\rightarrow$ Zero intermediate logs flushed.
+
+Negative run $\rightarrow$ Full context & failure log emitted.
