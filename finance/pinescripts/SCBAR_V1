@@ -209,11 +209,6 @@ showReaction = input.bool(
      "Show Reactions"
      )
 
-showDisplacement = input.bool(
-     true,
-     "Show Displacement"
-     )
-
 showBox = input.bool(
      true,
      "Show Consolidation Box"
@@ -776,35 +771,9 @@ if state == 1
     if bullishDisplacement
 
         longDisplacement := true
-
-        if showDisplacement
-
-            label.new(
-                 bar_index,
-                 low,
-                 "DISPLACEMENT",
-                 style=label.style_label_up,
-                 color=color.green,
-                 textcolor=color.white,
-                 size=size.tiny
-                 )
-
-
     if bearishDisplacement
 
         shortDisplacement := true
-
-        if showDisplacement
-
-            label.new(
-                 bar_index,
-                 high,
-                 "DISPLACEMENT",
-                 style=label.style_label_down,
-                 color=color.red,
-                 textcolor=color.white,
-                 size=size.tiny
-                 )
 
 
     //================================================
